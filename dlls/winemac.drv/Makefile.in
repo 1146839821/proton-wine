@@ -21,6 +21,7 @@ SOURCES = \
 	cocoa_cursorclipping.m \
 	cocoa_display.m \
 	cocoa_event.m \
+	cocoa_icon_utils.m \
 	cocoa_main.m \
 	cocoa_opengl.m \
 	cocoa_status_item.m \

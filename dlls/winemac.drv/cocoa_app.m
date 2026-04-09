@@ -24,6 +24,7 @@
 #import "cocoa_cursorclipping.h"
 #import "cocoa_event.h"
 #import "cocoa_window.h"
+#import "cocoa_icon_utils.h"
 
 #pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
 
@@ -1080,7 +1081,9 @@ static NSString* WineLocalizedString(unsigned int stringID)
     {
         NSImage* nsimage = nil;
 
-        if ([images count])
+        nsimage = [WineIconUtils maskedAppIconFromCGImages:images];  /* CW Hack 25964 */
+
+        if (!nsimage && [images count])
         {
             NSSize bestSize = NSZeroSize;
             id image;
