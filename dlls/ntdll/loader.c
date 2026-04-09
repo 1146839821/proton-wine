@@ -4579,6 +4579,18 @@ static void release_address_space(void)
 #endif
 }
 
+#if defined(__x86_64__) && !defined(__arm64ec__)
+extern void CDECL wine_get_host_version( const char **sysname, const char **release );
+
+static BOOL is_macos(void)
+{
+    const char *sysname;
+
+    wine_get_host_version( &sysname, NULL );
+    return !strcmp( sysname, "Darwin" );
+}
+#endif
+
 /******************************************************************
  *		loader_init
  *
@@ -4700,8 +4712,8 @@ void loader_init( CONTEXT *context, void **entry )
         wm = get_modref( NtCurrentTeb()->Peb->ImageBaseAddress );
     }
 
-#if defined(__APPLE__) && defined(__x86_64__)
-        if (!NtCurrentTeb()->WowTebOffset)
+#if defined(__x86_64__) && !defined(__arm64ec__)
+        if (is_macos() && !NtCurrentTeb()->WowTebOffset)
         {
             /* CW HACK 18756 */
             /* Preallocate TlsExpansionSlots.  Otherwise, kernelbase will
