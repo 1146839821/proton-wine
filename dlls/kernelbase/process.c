@@ -664,7 +664,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
 
     /* Process the AppName and/or CmdLine to get module name and path */
 
-    FIXME( "app %s cmdline %s\n", debugstr_w(app_name), debugstr_w(cmd_line) );
+    TRACE( "app %s cmdline %s\n", debugstr_w(app_name), debugstr_w(cmd_line) );
 
     if (new_token) FIXME( "No support for returning created process token\n" );
 
@@ -1992,6 +1992,35 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetEnvironmentVariableA( LPCSTR name, LPCSTR value
 }
 
 
+static BOOL is_ubisoft(void)
+{
+    WCHAR name[MAX_PATH], *module_exe;
+    if (GetModuleFileNameW( NULL, name, ARRAYSIZE(name) ))
+    {
+        module_exe = wcsrchr( name, '\\' );
+        module_exe = module_exe ? module_exe + 1 : name;
+        if (!wcsicmp( module_exe, L"upc.exe" ) ||
+            !wcsicmp( module_exe, L"UplayWebCore.exe" ))
+            return TRUE;
+    }
+    return FALSE;
+}
+static void write_ubisoft_vulkan_json( LPCWSTR value )
+{
+    static const char vk_swiftshader_icd_json[] =
+        "{\"file_format_version\": \"1.0.0\", \"ICD\": {\"library_path\": \".\\\\vk_swiftshader.dll\", \"api_version\": \"1.0.5\"}}";
+    HANDLE h;
+    if (wcschr( value, ';' ))
+        return;
+    if (!wcsstr( value, L"vk_swiftshader_icd.json" ))
+        return;
+    h = CreateFileW( value, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL );
+    if (!h)
+        return;
+    WriteFile( h, vk_swiftshader_icd_json, sizeof(vk_swiftshader_icd_json) - 1, NULL, NULL );
+    CloseHandle( h );
+    TRACE( "Created %s for Ubisoft Connect\n", debugstr_w(value) );
+}
 /***********************************************************************
  *           SetEnvironmentVariableW   (kernelbase.@)
  */
@@ -2007,6 +2036,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetEnvironmentVariableW( LPCWSTR name, LPCWSTR val
         SetLastError( ERROR_ENVVAR_NOT_FOUND );
         return FALSE;
     }
+
+    /* CW HACK 19252: Create the vk_swiftshader_icd.json file if Ubisoft Connect tries
+     * to use it and it doesn't exist.
+     */
+    if (!wcscmp( name, L"VK_ICD_FILENAMES" ) && value && is_ubisoft())
+        write_ubisoft_vulkan_json( value );
 
     if (name && !lstrcmpW( name, L"QT_OPENGL" ) && value && !lstrcmpW( value, L"angle" ))
     {
