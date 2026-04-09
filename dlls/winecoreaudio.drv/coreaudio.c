@@ -515,7 +515,7 @@ static AudioComponentInstance get_audiounit(EDataFlow dataflow, AudioDeviceID ad
 
     memset(&desc, 0, sizeof(desc));
     desc.componentType = kAudioUnitType_Output;
-    desc.componentSubType = kAudioUnitSubType_HALOutput;
+    desc.componentSubType = kAudioUnitSubType_DefaultOutput;
     desc.componentManufacturer = kAudioUnitManufacturer_Apple;
 
     if(!(comp = AudioComponentFindNext(NULL, &desc))){
