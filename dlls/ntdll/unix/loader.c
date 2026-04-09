@@ -92,6 +92,7 @@
 #include "unix_private.h"
 #include "esync.h"
 #include "fsync.h"
+#include "msync.h"
 #include "wine/list.h"
 #include "ntsyscalls.h"
 #include "wine/debug.h"
@@ -2352,6 +2353,7 @@ static void start_main_thread(void)
     signal_alloc_thread( teb );
     dbg_init();
     startup_info_size = server_init_process();
+    msync_init();
     hacks_init();
     fsync_init();
     esync_init();
