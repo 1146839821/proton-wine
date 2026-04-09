@@ -2194,7 +2194,9 @@ static int save_branch( struct key *key, const char *filename )
     }
 
     save_all_subkeys( key, f );
-    ret = !fclose(f);
+    ret = !fflush( f );
+    if (ret) ret = !fsync( fileno( f ) );
+    if (fclose( f ) != 0) ret = 0;
 
     if (tmp[0])
     {
