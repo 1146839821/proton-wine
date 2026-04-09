@@ -136,11 +136,6 @@ static inline mach_msg_return_t mach_msg2_internal( void *data, uint64_t option6
     return mr;
 }
 
-/* For older versions of macOS we need to provide fallback in case there is no mach_msg2... */
-extern mach_msg_return_t mach_msg_trap( mach_msg_header_t *msg, mach_msg_option_t option,
-        mach_msg_size_t send_size, mach_msg_size_t rcv_size, mach_port_name_t rcv_name, mach_msg_timeout_t timeout,
-        mach_port_name_t notify );
-
 static inline mach_msg_return_t mach_msg2( mach_msg_header_t *data, uint64_t option64,
     mach_msg_size_t send_size, mach_msg_size_t rcv_size, mach_port_t rcv_name, uint64_t timeout,
     uint32_t priority)
@@ -149,8 +144,8 @@ static inline mach_msg_return_t mach_msg2( mach_msg_header_t *data, uint64_t opt
     mach_msg_size_t descriptors;
 
     if (!mach_msg2_trap)
-        return mach_msg_trap( data, (mach_msg_option_t)option64, send_size,
-                              rcv_size, rcv_name, timeout, priority );
+        return mach_msg( data, (mach_msg_option_t)option64, send_size,
+                        rcv_size, rcv_name, timeout, priority );
 
     base = (mach_msg_base_t *)data;
 
