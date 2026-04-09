@@ -608,4 +608,40 @@ static inline NTSTATUS map_section( HANDLE mapping, void **ptr, SIZE_T *size, UL
 
 BOOL WINAPI __wine_needs_override_large_address_aware(void);
 
+/* CX Hack 23015 */
+#if defined(__APPLE__) && defined(__x86_64__)
+#include <wine/asm.h>
+
+extern void *libd3dshared_load_addr, *libd3dshared_code_end;
+
+#define GPT_IMPORT(name) sysv_##name
+#define GPT_ABI_WRAPPER(name) \
+    __ASM_GLOBAL_FUNC( name, \
+        /* Using rax for scratch to fetch externs, rcx for return address. */ \
+        "push %rax\n\t" \
+        "push %rcx\n\t" \
+        "movq " __ASM_NAME("libd3dshared_load_addr") "@GOTPCREL(%rip), %rax\n\t" \
+        /* Always use the sysv version if we didn't load libd3dshared. */ \
+        "cmpq $0, (%rax)\n\t" \
+        "je " __ASM_LOCAL_LABEL("jmp_sysv_" #name) "\n\t" \
+        /* Is the return address (rsp+16) inside libd3dshared? */ \
+        "movq 16(%rsp), %rcx\n\t" \
+        "cmpq (%rax), %rcx\n\t" \
+        "jb " __ASM_LOCAL_LABEL("jmp_sysv_" #name) "\n\t" \
+        "movq " __ASM_NAME("libd3dshared_code_end") "@GOTPCREL(%rip), %rax\n\t" \
+        "cmpq (%rax), %rcx\n\t" \
+        "ja " __ASM_LOCAL_LABEL("jmp_sysv_" #name) "\n\t" \
+        /* Yes; use the ms_abi thunk. */ \
+        "pop %rcx\n\t" \
+        "pop %rax\n\t" \
+        "jmp " __ASM_NAME("msthunk_" #name) "\n\t" \
+        /* No; use sysv. */ \
+        __ASM_LOCAL_LABEL("jmp_sysv_" #name) ":\n\t" \
+        "pop %rcx\n\t" \
+        "pop %rax\n\t" \
+        "jmp " __ASM_NAME("sysv_" #name) "\n\t" )
+#else
+#define GPT_IMPORT(name) name
+#endif
+
 #endif /* __NTDLL_UNIX_PRIVATE_H */

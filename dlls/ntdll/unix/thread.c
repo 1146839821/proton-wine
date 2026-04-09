@@ -1323,7 +1323,7 @@ NTSTATUS WINAPI NtCreateThread( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRI
 /***********************************************************************
  *              NtCreateThreadEx   (NTDLL.@)
  */
-NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
+NTSTATUS WINAPI GPT_IMPORT(NtCreateThreadEx)( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
                                   HANDLE process, PRTL_THREAD_START_ROUTINE start, void *param,
                                   ULONG flags, ULONG_PTR zero_bits, SIZE_T stack_commit,
                                   SIZE_T stack_reserve, PS_ATTRIBUTE_LIST *attr_list )
@@ -1453,6 +1453,21 @@ done:
     return STATUS_SUCCESS;
 }
 
+/* CW Hack 23015 */
+#if defined(__APPLE__) && defined(__x86_64__)
+
+NTSTATUS __attribute__((ms_abi)) msthunk_NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
+                                                           HANDLE process, PRTL_THREAD_START_ROUTINE start, void *param,
+                                                           ULONG flags, ULONG_PTR zero_bits, SIZE_T stack_commit,
+                                                           SIZE_T stack_reserve, PS_ATTRIBUTE_LIST *attr_list )
+{
+    return sysv_NtCreateThreadEx( handle, access, attr, process, start, param, flags,
+                                  zero_bits, stack_commit, stack_reserve, attr_list );
+}
+
+GPT_ABI_WRAPPER( NtCreateThreadEx );
+
+#endif
 
 /***********************************************************************
  *           abort_thread
