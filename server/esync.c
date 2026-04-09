@@ -678,7 +678,6 @@ DECL_HANDLER(get_esync_write_fd)
         fprintf( stderr, "This path shouldn't be reached! ntdll is being stupid.\n" );
         send_client_fd( current->process, fd->fd, req->handle );
 #else
-        fprintf( stderr, "send_client_fd: %d.\n", fd->fds[1] );
         send_client_fd( current->process, fd->fds[1], req->handle );
 #endif
     }

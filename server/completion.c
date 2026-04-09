@@ -79,8 +79,8 @@ struct completion
     struct list    wait_queue;
     unsigned int   depth;
     int            closed;
-    int                esync_fd;
-    unsigned int       fsync_idx;
+    struct esync_fd*  esync_fd;
+    unsigned int   fsync_idx;
 };
 
 static void completion_wait_dump( struct object*, int );

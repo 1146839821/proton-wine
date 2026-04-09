@@ -294,7 +294,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->msync_idx       = 0;
     thread->msync_apc_idx   = 0;
     thread->esync_fd        = NULL;
-    thread->esync_apc_fd    = -1;
+    thread->esync_apc_fd    = NULL;
     thread->fsync_idx       = 0;
     thread->system_regs     = 0;
     thread->queue           = NULL;
