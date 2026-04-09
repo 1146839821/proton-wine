@@ -417,7 +417,9 @@ struct fsync *create_fsync( struct object *root, const struct unicode_str *name,
 
 static inline int futex_wake( int *addr, int val )
 {
+#ifdef __linux__
     return syscall( __NR_futex, addr, 1, val, NULL, 0, 0 );
+#endif
 }
 
 /* shm layout for events or event-like objects. */
