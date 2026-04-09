@@ -10,6 +10,23 @@ be used for porting Windows code into native Unix executables.
 Wine is free software, released under the GNU LGPL; see the file
 LICENSE for the details.
 
+## PROJECT PATCH SOURCES (Proton macOS)
+
+This repository is a Proton-based Wine tree with additional patches for
+macOS compatibility, graphics integration, and game-specific behavior.
+The patch set is curated from multiple sources, including:
+
+- WineCX
+- CrossOver (CodeWeavers)
+- upstream Wine
+- other community and project-specific compatibility fixes
+
+To keep history easier to review and maintain, some imported patches are
+reorganized during replay.
+
+Many thanks to all upstream projects and contributors whose work made
+these fixes possible.
+
 
 ## QUICK START
 
