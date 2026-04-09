@@ -619,7 +619,8 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd )
         {L"UnrealCEFSubProcess.exe", L" --use-gl=swiftshader", "2316580"},
         {L"UnrealCEFSubProcess.exe", L" --use-angle=d3d9", "2684500"},
         {L"\\EACefSubProcess.exe", L" --use-angle=vulkan"},
-        {L"steamwebhelper.exe", L" --no-sandbox --in-process-gpu --disable-gpu --type=crashpad-handler"}
+        {L"steamwebhelper.exe", L" --no-sandbox --in-process-gpu --disable-gpu --type=crashpad-handler"},
+        {L"SlayTheSpire2.exe", L" --rendering-driver opengl3"},
     };
     unsigned int i;
     char sgi[64];
@@ -663,7 +664,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
 
     /* Process the AppName and/or CmdLine to get module name and path */
 
-    TRACE( "app %s cmdline %s\n", debugstr_w(app_name), debugstr_w(cmd_line) );
+    FIXME( "app %s cmdline %s\n", debugstr_w(app_name), debugstr_w(cmd_line) );
 
     if (new_token) FIXME( "No support for returning created process token\n" );
 
