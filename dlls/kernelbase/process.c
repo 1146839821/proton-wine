@@ -619,7 +619,7 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd )
         {L"UnrealCEFSubProcess.exe", L" --use-gl=swiftshader", "2316580"},
         {L"UnrealCEFSubProcess.exe", L" --use-angle=d3d9", "2684500"},
         {L"\\EACefSubProcess.exe", L" --use-angle=vulkan"},
-        {L"steamwebhelper.exe", L" --no-sandbox --in-process-gpu --disable-gpu --type=crashpad-handler"},
+        {L"steamwebhelper.exe", L" --no-sandbox --single-process --disable-gpu"},
         {L"SlayTheSpire2.exe", L" --rendering-driver opengl3"},
     };
     unsigned int i;
