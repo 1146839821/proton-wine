@@ -619,6 +619,7 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd )
         {L"\\EACefSubProcess.exe", L" --use-angle=vulkan"},
         {L"steamwebhelper.exe", L" --no-sandbox --single-process --disable-gpu"},
         {L"SlayTheSpire2.exe", L" --rendering-driver opengl3"},
+        {L"EADesktop.exe", L" --in-process-gpu --use-gl=angle"},
     };
     unsigned int i;
     char sgi[64];
