@@ -72,7 +72,9 @@
 
 #include <sys/uio.h>
 
+#ifdef __linux__
 #include <linux/userfaultfd.h>
+#endif
 #include <sys/ioctl.h>
 #include "uffd_tmp_defs.h"
 
@@ -404,6 +406,7 @@ static void kernel_writewatch_softdirty_init(void)
 
 static void kernel_writewatch_init(void)
 {
+#ifdef __linux__
     struct uffdio_api uffdio_api;
 
     uffd_fd = syscall( __NR_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY );
@@ -429,6 +432,7 @@ static void kernel_writewatch_init(void)
         return;
     }
     use_kernel_writewatch = 1;
+#endif
 }
 
 static void kernel_writewatch_reset( void *start, SIZE_T len )
@@ -462,6 +466,7 @@ static void kernel_writewatch_reset( void *start, SIZE_T len )
 
 static void kernel_writewatch_register_range( struct file_view *view, void *base, size_t size )
 {
+#ifdef __linux__
     struct uffdio_register uffdio_register;
     struct uffdio_writeprotect wp;
 
@@ -497,6 +502,7 @@ static void kernel_writewatch_register_range( struct file_view *view, void *base
         perror("ioctl(UFFDIO_WRITEPROTECT)");
         exit(-1);
     }
+#endif
 }
 
 static NTSTATUS kernel_soft_dirty_get_write_watches( void *base, SIZE_T size, void **addresses, ULONG_PTR *count, BOOL reset )

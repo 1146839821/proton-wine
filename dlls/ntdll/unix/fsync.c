@@ -149,6 +149,7 @@ static void simulate_sched_quantum(void)
     usleep(0);
 }
 
+#ifdef __linux__
 static inline int futex_wait_multiple( const struct futex_waitv *futexes,
         int count, const struct timespec64 *end, clockid_t clock_id )
 {
@@ -162,6 +163,18 @@ static inline int futex_wake( int *addr, int val )
 {
     return syscall( __NR_futex, addr, 1, val, NULL, 0, 0 );
 }
+#else
+static inline int futex_wait_multiple( const struct futex_waitv *futexes,
+        int count, const struct timespec64 *end, clockid_t clock_id )
+{
+    return -1;
+}
+
+static inline int futex_wake( int *addr, int val )
+{
+    return -1;
+}
+#endif
 
 int do_fsync(void)
 {

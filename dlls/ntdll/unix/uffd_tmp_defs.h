@@ -26,6 +26,9 @@
 #define PAGE_IS_SWAPPED		(1 << 4)
 #define PAGE_IS_PFNZERO		(1 << 5)
 #define PAGE_IS_HUGE		(1 << 6)
+
+typedef uint64_t __u64;
+
 /*
  * struct page_region - Page region with flags
  * @start:	Start of the region

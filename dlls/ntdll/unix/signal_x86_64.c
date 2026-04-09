@@ -2933,7 +2933,16 @@ void signal_init_process(void)
 
 void set_thread_teb( TEB *teb )
 {
+#if defined __linux__
     arch_prctl( ARCH_SET_GS, teb );
+#elif defined (__FreeBSD__) || defined (__FreeBSD_kernel__)
+    amd64_set_gsbase( teb );
+#elif defined(__NetBSD__)
+    sysarch( X86_64_SET_GSBASE, &teb );
+#elif defined (__APPLE__)
+    __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
+    __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
+#endif
 }
 
 /***********************************************************************
