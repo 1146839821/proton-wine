@@ -26,10 +26,40 @@
 
 #ifdef HAVE_FFMPEG
 
-/* Private context for the BSF */
-typedef struct PCMByteOrderReverseContext {
-    int initialized;
-} PCMByteOrderReverseContext;
+#define IS_EMPTY(pkt) (!(pkt)->data && !(pkt)->side_data_elems)
+
+/* From FFmpeg */
+int ff_bsf_get_packet(AVBSFContext *ctx, AVPacket **pkt)
+{
+#if (LIBAVCODEC_VERSION_MAJOR > 59) || (LIBAVCODEC_VERSION_MAJOR == 59 && LIBAVCODEC_VERSION_MINOR > 6)
+    struct FFBSFContext {
+        AVBSFContext pub;
+        AVPacket *buffer_pkt;
+        int eof;
+    } *bsfi = (void *)ctx;
+#else
+    struct AVBSFInternal {
+        AVPacket *buffer_pkt;
+        int eof;
+    } *bsfi = ctx->internal;
+#endif
+    AVPacket *tmp_pkt;
+
+    if (bsfi->eof)
+        return AVERROR_EOF;
+
+    if (IS_EMPTY(bsfi->buffer_pkt))
+        return AVERROR(EAGAIN);
+
+    tmp_pkt = av_packet_alloc();
+    if (!tmp_pkt)
+        return AVERROR(ENOMEM);
+
+    *pkt = bsfi->buffer_pkt;
+    bsfi->buffer_pkt = tmp_pkt;
+
+    return 0;
+}
 
 static enum AVCodecID reverse_codec_id(enum AVCodecID codec_id)
 {
@@ -51,99 +81,64 @@ static enum AVCodecID reverse_codec_id(enum AVCodecID codec_id)
     }
 }
 
-static int pcm_byte_order_reverse_init(AVBSFContext *ctx)
+static int init(AVBSFContext *ctx)
 {
-    PCMByteOrderReverseContext *s = ctx->priv_data;
-    
-#if LIBAVCODEC_VERSION_MAJOR >= 59
-    if (ctx->par_in->ch_layout.nb_channels <= 0 || ctx->par_in->sample_rate <= 0)
+#if (LIBAVUTIL_VERSION_MAJOR > 57) || (LIBAVUTIL_VERSION_MAJOR == 57 && LIBAVUTIL_VERSION_MINOR > 24)
+    int in_channels = ctx->par_in->ch_layout.nb_channels;
 #else
-    if (ctx->par_in->channels <= 0 || ctx->par_in->sample_rate <= 0)
+    int in_channels = ctx->par_in->channels;
 #endif
+    if (in_channels <= 0)
         return AVERROR(EINVAL);
-    
+    if (ctx->par_in->sample_rate <= 0)
+        return AVERROR(EINVAL);
     if (ctx->par_in->bits_per_coded_sample % 8u)
         return AVERROR(EINVAL);
 
     ctx->par_out->codec_id = reverse_codec_id(ctx->par_in->codec_id);
-    s->initialized = 1;
-    
+
     return 0;
 }
 
-/* This implementation provides a compatibility layer for newer FFmpeg versions.
- * The actual filtering logic is preserved but adapted to work with the simplified BSF structure. */
-
-static int ff_bsf_get_packet(AVBSFContext *ctx, AVPacket **pkt)
-{
-    int ret;
-    AVPacket *tmp_pkt;
-
-    tmp_pkt = av_packet_alloc();
-    if (!tmp_pkt)
-        return AVERROR(ENOMEM);
-
-    /* In newer FFmpeg, we need to first send a packet, then receive it */
-    /* This is a simplified implementation that may need adjustment based on actual usage */
-    ret = av_bsf_receive_packet(ctx, tmp_pkt);
-    if (ret < 0) {
-        av_packet_free(&tmp_pkt);
-        return ret;
-    }
-
-    *pkt = tmp_pkt;
-    return 0;
-}
-
-static int pcm_byte_order_reverse_filter(AVBSFContext *ctx, AVPacket *out)
+static int byte_order_reverse_filter(AVBSFContext *ctx, AVPacket *pkt)
 {
     unsigned int bytes_per_sample;
     const uint8_t *buf_end;
     const uint8_t *buf;
     unsigned int i;
-    AVPacket *in = NULL;
-    uint8_t *out_data;
+    AVPacket *in;
+    uint8_t *out;
     int ret;
 
     ret = ff_bsf_get_packet(ctx, &in);
     if (ret < 0)
         return ret;
 
-    if (!in || !in->data) {
-        ret = AVERROR(EAGAIN);
-        goto fail;
-    }
-
     buf = in->data;
     buf_end = in->data + in->size;
 
-    ret = av_new_packet(out, in->size);
+    ret = av_new_packet(pkt, in->size);
     if (ret < 0)
-        goto fail;
+        return ret;
+    out = pkt->data;
 
-    out_data = out->data;
-
-    ret = av_packet_copy_props(out, in);
+    ret = av_packet_copy_props(pkt, in);
     if (ret < 0)
         goto fail;
 
     bytes_per_sample = ctx->par_in->bits_per_coded_sample / 8u;
 
-    /* Reverse byte order for each sample */
     while (buf < buf_end)
     {
         for (i = 0; i < bytes_per_sample; ++i)
-            out_data[i] = buf[bytes_per_sample - i - 1];
+            out[i] = buf[bytes_per_sample - i - 1];
         buf += bytes_per_sample;
-        out_data += bytes_per_sample;
+        out += bytes_per_sample;
     }
-
-    av_packet_free(&in);
-    return 0;
 
 fail:
     if (ret < 0)
-        av_packet_unref(out);
+        av_packet_unref(pkt);
     av_packet_free(&in);
     return ret;
 }
@@ -165,10 +160,36 @@ static const enum AVCodecID codec_ids[] = {
     AV_CODEC_ID_NONE,
 };
 
+
+#if (LIBAVCODEC_VERSION_MAJOR > 59) || (LIBAVCODEC_VERSION_MAJOR == 59 && LIBAVCODEC_VERSION_MINOR > 25)
+typedef struct FFBitStreamFilter {
+    AVBitStreamFilter p;
+
+    int priv_data_size;
+    int (*init)(AVBSFContext *ctx);
+    int (*filter)(AVBSFContext *ctx, AVPacket *pkt);
+    void (*close)(AVBSFContext *ctx);
+    void (*flush)(AVBSFContext *ctx);
+} FFBitStreamFilter;
+
+const FFBitStreamFilter ff_pcm_byte_order_reverse_bsf = {
+    .p.name         = "pcm_byte_order_reverse",
+    .p.codec_ids    = codec_ids,
+    .filter         = byte_order_reverse_filter,
+    .init           = init,
+};
+
+const AVBitStreamFilter *pff_pcm_byte_order_reverse_bsf = &ff_pcm_byte_order_reverse_bsf.p;
+#else
 const AVBitStreamFilter ff_pcm_byte_order_reverse_bsf = {
     .name           = "pcm_byte_order_reverse",
+    .filter         = byte_order_reverse_filter,
+    .init           = init,
     .codec_ids      = codec_ids,
-    .priv_class     = NULL,
 };
+
+
+const AVBitStreamFilter *pff_pcm_byte_order_reverse_bsf = &ff_pcm_byte_order_reverse_bsf;
+#endif
 
 #endif /* HAVE_FFMPEG */
