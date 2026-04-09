@@ -58,8 +58,8 @@ struct thread
     struct list            mutex_list;    /* list of currently owned mutexes */
     unsigned int           msync_idx;
     unsigned int           msync_apc_idx;
-    int                    esync_fd;      /* esync file descriptor (signalled on exit) */
-    int                    esync_apc_fd;  /* esync apc fd (signalled when APCs are present) */
+    struct esync_fd       *esync_fd;      /* esync file descriptor (signalled on exit) */
+    struct esync_fd       *esync_apc_fd;  /* esync apc fd (signalled when APCs are present) */
     unsigned int           fsync_idx;
     unsigned int           fsync_apc_idx;
     unsigned int           system_regs;   /* which system regs have been set */

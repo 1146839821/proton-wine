@@ -21,9 +21,9 @@
 #include "config.h"
 
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <stdint.h>
 #include <stdarg.h>
 #ifdef HAVE_SYS_EVENTFD_H
 # include <sys/eventfd.h>
@@ -43,20 +43,16 @@
 #include "request.h"
 #include "file.h"
 #include "esync.h"
-#include "fsync.h"
+#include "msync.h"
 
 int do_esync(void)
 {
-#ifdef HAVE_SYS_EVENTFD_H
     static int do_esync_cached = -1;
 
     if (do_esync_cached == -1)
-        do_esync_cached = getenv("WINEESYNC") && atoi(getenv("WINEESYNC")) && !do_fsync();
+        do_esync_cached = getenv("WINEESYNC") && atoi(getenv("WINEESYNC")) && !do_msync();
 
     return do_esync_cached;
-#else
-    return 0;
-#endif
 }
 
 static char shm_name[29];
@@ -96,28 +92,40 @@ void esync_init(void)
     shm_addrs = calloc( 128, sizeof(shm_addrs[0]) );
     shm_addrs_size = 128;
 
-    shm_size = pagesize;
+    shm_size = pagesize * 1024;
     if (ftruncate( shm_fd, shm_size ) == -1)
         perror( "ftruncate" );
 
-    fprintf( stderr, "esync: up and running.\n" );
+    fprintf( stderr, "esync: up and running: %d.\n", shm_fd);
 
     atexit( shm_cleanup );
 }
 
 static struct list mutex_list = LIST_INIT(mutex_list);
 
+struct esync_fd
+{
+#ifdef HAVE_SYS_EVENTFD_H
+    int fd;
+#else
+    /* Write to 0, read from 1. */
+    int fds[2];
+#endif
+};
+
 struct esync
 {
     struct object   obj;            /* object header */
-    int             fd;             /* eventfd file descriptor */
+    /* No, this isn't a pointer. We can have lots of these so let's try to save
+     * memory a little. */
+    struct esync_fd fd;             /* eventfd file descriptor */
     enum esync_type type;
     unsigned int    shm_idx;        /* index into the shared memory section */
     struct list     mutex_entry;    /* entry in the mutex list (if applicable) */
 };
 
 static void esync_dump( struct object *obj, int verbose );
-static int esync_get_esync_fd( struct object *obj, enum esync_type *type );
+static struct esync_fd *esync_get_esync_fd( struct object *obj, enum esync_type *type );
 static unsigned int esync_map_access( struct object *obj, unsigned int access );
 static void esync_destroy( struct object *obj );
 
@@ -145,21 +153,25 @@ const struct object_ops esync_ops =
     no_open_file,              /* open_file */
     no_kernel_obj_list,        /* get_kernel_obj_list */
     no_close_handle,           /* close_handle */
-    esync_destroy              /* destroy */
+    esync_destroy,             /* destroy */
 };
 
 static void esync_dump( struct object *obj, int verbose )
 {
     struct esync *esync = (struct esync *)obj;
     assert( obj->ops == &esync_ops );
-    fprintf( stderr, "esync fd=%d\n", esync->fd );
+#ifdef HAVE_SYS_EVENTFD_H
+    fprintf( stderr, "esync type=%d fd=%d\n", esync->type, esync->fd.fd );
+#else
+    fprintf( stderr, "esync type=%d fd=%d,%d\n", esync->type, esync->fd.fds[0], esync->fd.fds[1] );
+#endif
 }
 
-static int esync_get_esync_fd( struct object *obj, enum esync_type *type )
+static struct esync_fd *esync_get_esync_fd( struct object *obj, enum esync_type *type )
 {
     struct esync *esync = (struct esync *)obj;
     *type = esync->type;
-    return esync->fd;
+    return &esync->fd;
 }
 
 static unsigned int esync_map_access( struct object *obj, unsigned int access )
@@ -177,7 +189,12 @@ static void esync_destroy( struct object *obj )
     struct esync *esync = (struct esync *)obj;
     if (esync->type == ESYNC_MUTEX)
         list_remove( &esync->mutex_entry );
-    close( esync->fd );
+#ifdef HAVE_SYS_EVENTFD_H
+    close( esync->fd.fd );
+#else
+    close( esync->fd.fds[0] );
+    close( esync->fd.fds[1] );
+#endif
 }
 
 static int type_matches( enum esync_type type1, enum esync_type type2 )
@@ -244,36 +261,71 @@ struct event
 };
 C_ASSERT(sizeof(struct event) == 8);
 
+static int esync_init_fd( struct esync_fd *fd, int initval, int semaphore )
+{
+#ifdef HAVE_SYS_EVENTFD_H
+    int flags = EFD_CLOEXEC | EFD_NONBLOCK;
+    if (semaphore) flags |= EFD_SEMAPHORE;
+    fd->fd = eventfd( initval, flags );
+    if (fd->fd == -1)
+    {
+        perror( "eventfd" );
+        return -1;
+    }
+#else
+    static const unsigned char value;
+    int fdflags;
+
+    if (pipe(fd->fds) == -1)
+    {
+        perror( "pipe" );
+        return -1;
+    }
+    fcntl( fd->fds[0], F_SETFD, FD_CLOEXEC );
+    if ((fdflags = fcntl( fd->fds[0], F_GETFL, 0 )) == -1)
+        fdflags = 0;
+    fcntl( fd->fds[0], F_SETFL, fdflags | O_NONBLOCK );
+
+    fcntl( fd->fds[1], F_SETFD, FD_CLOEXEC );
+    if ((fdflags = fcntl( fd->fds[1], F_GETFL, 0 )) == -1)
+        fdflags = 0;
+    fcntl( fd->fds[1], F_SETFL, fdflags | O_NONBLOCK );
+
+    while (initval--)
+        write( fd->fds[1], &value, sizeof(value) );
+#endif
+    return 0;
+}
+
 struct esync *create_esync( struct object *root, const struct unicode_str *name,
                             unsigned int attr, int initval, int max, enum esync_type type,
                             const struct security_descriptor *sd )
 {
-#ifdef HAVE_SYS_EVENTFD_H
     struct esync *esync;
 
     if ((esync = create_named_object( root, &esync_ops, name, attr, sd )))
     {
         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
         {
-            int flags = EFD_CLOEXEC | EFD_NONBLOCK;
-
-            if (type == ESYNC_SEMAPHORE)
-                flags |= EFD_SEMAPHORE;
+            esync->type = type;
 
             /* initialize it if it didn't already exist */
-            esync->fd = eventfd( initval, flags );
-            if (esync->fd == -1)
+            if (esync_init_fd( &esync->fd, initval, type == ESYNC_SEMAPHORE ) == -1)
             {
                 perror( "eventfd" );
                 file_set_error();
                 release_object( esync );
                 return NULL;
             }
-            esync->type = type;
 
             /* Use the fd as index, since that'll be unique across all
              * processes, but should hopefully end up also allowing reuse. */
-            esync->shm_idx = esync->fd + 1; /* we keep index 0 reserved */
+#ifdef HAVE_SYS_EVENTFD_H
+            esync->shm_idx = esync->fd.fd + 1; /* we keep index 0 reserved */
+#else
+            esync->shm_idx = esync->fd.fds[0] + 1; /* we keep index 0 reserved */
+#endif
+
             while (esync->shm_idx * 8 >= shm_size)
             {
                 /* Better expand the shm section. */
@@ -331,59 +383,66 @@ struct esync *create_esync( struct object *root, const struct unicode_str *name,
         }
     }
     return esync;
-#else
-    /* FIXME: Provide a fallback implementation using pipe(). */
-    set_error( STATUS_NOT_IMPLEMENTED );
-    return NULL;
-#endif
 }
 
-/* Create a file descriptor for an existing handle.
- * Caller must close the handle when it's done; it's not linked to an esync
- * server object in any way. */
-int esync_create_fd( int initval, int flags )
+/* Create an eventfd or eventfd-like primitive for an existing handle.
+ * Caller must close with esync_close_fd(). */
+struct esync_fd *esync_create_fd( int initval, int semaphore )
+{
+    struct esync_fd *fd = mem_alloc( sizeof(*fd) );
+    esync_init_fd( fd, initval, semaphore );
+    return fd;
+}
+
+void esync_close_fd( struct esync_fd *fd )
 {
 #ifdef HAVE_SYS_EVENTFD_H
-    int fd;
-
-    fd = eventfd( initval, flags | EFD_CLOEXEC | EFD_NONBLOCK );
-    if (fd == -1)
-        perror( "eventfd" );
-
-    return fd;
+    close( fd->fd );
 #else
-    return -1;
+    close( fd->fds[0] );
+    close( fd->fds[1] );
 #endif
+    free( fd );
 }
 
 /* Wake up a specific fd. */
-void esync_wake_fd( int fd )
+void esync_wake_fd( struct esync_fd *fd )
 {
+#ifdef HAVE_SYS_EVENTFD_H
     static const uint64_t value = 1;
 
-    if (write( fd, &value, sizeof(value) ) == -1)
+    if (write( fd->fd, &value, sizeof(value) ) == -1 && errno != EAGAIN)
         perror( "esync: write" );
+#else
+    static const char value;
+
+    if (write( fd->fds[1], &value, sizeof(value) ) == -1 && errno != EAGAIN)
+        perror( "esync: write" );
+#endif
 }
 
 /* Wake up a server-side esync object. */
 void esync_wake_up( struct object *obj )
 {
     enum esync_type dummy;
-    int fd;
 
     if (obj->ops->get_esync_fd)
     {
-        fd = obj->ops->get_esync_fd( obj, &dummy );
-        esync_wake_fd( fd );
+        esync_wake_fd( obj->ops->get_esync_fd( obj, &dummy ) );
     }
 }
 
-void esync_clear( int fd )
+void esync_clear( struct esync_fd *fd )
 {
+#ifdef HAVE_SYS_EVENTFD_H
     uint64_t value;
 
     /* we don't care about the return value */
-    read( fd, &value, sizeof(value) );
+    read( fd->fd, &value, sizeof(value) );
+#else
+    static char buffer[4096];
+    while (read( fd->fds[0], buffer, sizeof(buffer) ) == sizeof(buffer));
+#endif
 }
 
 static inline void small_pause(void)
@@ -398,14 +457,17 @@ static inline void small_pause(void)
 /* Server-side event support. */
 void esync_set_event( struct esync *esync )
 {
-    static const uint64_t value = 1;
     struct event *event = get_shm( esync->shm_idx );
 
     assert( esync->obj.ops == &esync_ops );
     assert( event != NULL );
 
     if (debug_level)
-        fprintf( stderr, "esync_set_event() fd=%d\n", esync->fd );
+    {
+        fprintf( stderr, "esync_set_event()" );
+        esync_dump( &esync->obj, 0 );
+        fprintf( stderr, "\n" );
+    }
 
     if (esync->type == ESYNC_MANUAL_EVENT)
     {
@@ -414,11 +476,8 @@ void esync_set_event( struct esync *esync )
             small_pause();
     }
 
-    if (!__atomic_exchange_n( &event->signaled, 1, __ATOMIC_SEQ_CST ))
-    {
-        if (write( esync->fd, &value, sizeof(value) ) == -1)
-            perror( "esync: write" );
-    }
+    if (!InterlockedExchange( &event->signaled, 1 ))
+        esync_wake_fd( &esync->fd );
 
     if (esync->type == ESYNC_MANUAL_EVENT)
     {
@@ -429,14 +488,17 @@ void esync_set_event( struct esync *esync )
 
 void esync_reset_event( struct esync *esync )
 {
-    static uint64_t value = 1;
     struct event *event = get_shm( esync->shm_idx );
 
     assert( esync->obj.ops == &esync_ops );
     assert( event != NULL );
 
     if (debug_level)
-        fprintf( stderr, "esync_reset_event() fd=%d\n", esync->fd );
+    {
+        fprintf( stderr, "esync_reset_event()" );
+        esync_dump( &esync->obj, 0 );
+        fprintf( stderr, "\n" );
+    }
 
     if (esync->type == ESYNC_MANUAL_EVENT)
     {
@@ -446,11 +508,8 @@ void esync_reset_event( struct esync *esync )
     }
 
     /* Only bother signaling the fd if we weren't already signaled. */
-    if (__atomic_exchange_n( &event->signaled, 0, __ATOMIC_SEQ_CST ))
-    {
-        /* we don't care about the return value */
-        read( esync->fd, &value, sizeof(value) );
-    }
+    if (InterlockedExchange( &event->signaled, 0 ))
+        esync_clear( &esync->fd );
 
     if (esync->type == ESYNC_MANUAL_EVENT)
     {
@@ -470,10 +529,14 @@ void esync_abandon_mutexes( struct thread *thread )
         if (mutex->tid == thread->id)
         {
             if (debug_level)
-                fprintf( stderr, "esync_abandon_mutexes() fd=%d\n", esync->fd );
+            {
+                fprintf( stderr, "esync_abandon_mutexes()\n" );
+                esync_dump( &esync->obj, 0 );
+                fprintf( stderr, "\n" );
+            }
             mutex->tid = ~0;
             mutex->count = 0;
-            esync_wake_fd( esync->fd );
+            esync_wake_fd( &esync->fd );
         }
     }
 }
@@ -510,7 +573,11 @@ DECL_HANDLER(create_esync)
 
         reply->type = esync->type;
         reply->shm_idx = esync->shm_idx;
-        send_client_fd( current->process, esync->fd, reply->handle );
+#ifdef HAVE_SYS_EVENTFD_H
+        send_client_fd( current->process, esync->fd.fd, reply->handle );
+#else
+        send_client_fd( current->process, esync->fd.fds[0], reply->handle );
+#endif
         release_object( esync );
     }
 
@@ -543,20 +610,24 @@ DECL_HANDLER(open_esync)
         reply->type = esync->type;
         reply->shm_idx = esync->shm_idx;
 
-        send_client_fd( current->process, esync->fd, reply->handle );
+#ifdef HAVE_SYS_EVENTFD_H
+        send_client_fd( current->process, esync->fd.fd, reply->handle );
+#else
+        send_client_fd( current->process, esync->fd.fds[0], reply->handle );
+#endif
         release_object( esync );
     }
 }
 
 /* Retrieve a file descriptor for an esync object which will be signaled by the
  * server. The client should only read from (i.e. wait on) this object. */
-DECL_HANDLER(get_esync_fd)
+DECL_HANDLER(get_esync_read_fd)
 {
     struct object *obj;
     enum esync_type type;
-    int fd;
+    struct esync_fd *fd;
 
-    if (!(obj = get_handle_obj( current->process, req->handle, SYNCHRONIZE, NULL )))
+    if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL )))
         return;
 
     if (obj->ops->get_esync_fd)
@@ -570,7 +641,11 @@ DECL_HANDLER(get_esync_fd)
         }
         else
             reply->shm_idx = 0;
-        send_client_fd( current->process, fd, req->handle );
+#ifdef HAVE_SYS_EVENTFD_H
+        send_client_fd( current->process, fd->fd, req->handle );
+#else
+        send_client_fd( current->process, fd->fds[0], req->handle );
+#endif
     }
     else
     {
@@ -585,8 +660,42 @@ DECL_HANDLER(get_esync_fd)
     release_object( obj );
 }
 
+/* Retrieve a file descriptor for an esync object, which will be written to.
+ * This should not be used for server-bound objects. */
+DECL_HANDLER(get_esync_write_fd)
+{
+    struct object *obj;
+    enum esync_type type;
+    struct esync_fd *fd;
+
+    if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL )))
+        return;
+
+    if (obj->ops->get_esync_fd)
+    {
+        fd = obj->ops->get_esync_fd( obj, &type );
+#ifdef HAVE_SYS_EVENTFD_H
+        fprintf( stderr, "This path shouldn't be reached! ntdll is being stupid.\n" );
+        send_client_fd( current->process, fd->fd, req->handle );
+#else
+        fprintf( stderr, "send_client_fd: %d.\n", fd->fds[1] );
+        send_client_fd( current->process, fd->fds[1], req->handle );
+#endif
+    }
+    else {
+        fprintf( stderr, "get_esync_fd not impl!\n" );
+        set_error( STATUS_NOT_IMPLEMENTED );
+    }
+
+    release_object( obj );
+}
+
 /* Return the fd used for waiting on user APCs. */
 DECL_HANDLER(get_esync_apc_fd)
 {
-    send_client_fd( current->process, current->esync_apc_fd, current->id );
+#ifdef HAVE_SYS_EVENTFD_H
+    send_client_fd( current->process, current->esync_apc_fd->fd, current->id );
+#else
+    send_client_fd( current->process, current->esync_apc_fd->fds[0], current->id );
+#endif
 }

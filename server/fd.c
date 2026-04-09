@@ -158,7 +158,7 @@ struct fd
     apc_param_t          comp_key;    /* completion key to set in completion events */
     unsigned int         comp_flags;  /* completion flags */
     unsigned int         msync_idx;   /* msync shm index */
-    int                  esync_fd;    /* esync file descriptor */
+    struct esync_fd     *esync_fd;    /* esync file descriptor */
     unsigned int         fsync_idx;   /* fsync shm index */
 };
 
@@ -1594,7 +1594,7 @@ static void fd_destroy( struct object *obj )
         msync_destroy_semaphore( fd->msync_idx );
 
     if (do_esync())
-        close( fd->esync_fd );
+        esync_close_fd( fd->esync_fd );
     if (fd->fsync_idx) fsync_free_shm_idx( fd->fsync_idx );
 }
 
@@ -1715,7 +1715,7 @@ static struct fd *alloc_fd_object(void)
     fd->completion = NULL;
     fd->comp_flags = 0;
     fd->msync_idx  = 0;
-    fd->esync_fd   = -1;
+    fd->esync_fd   = NULL;
     fd->fsync_idx  = 0;
     init_async_queue( &fd->read_q );
     init_async_queue( &fd->write_q );
@@ -1768,7 +1768,7 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
     fd->comp_flags = 0;
     fd->no_fd_status = STATUS_BAD_DEVICE_TYPE;
     fd->msync_idx  = 0;
-    fd->esync_fd   = -1;
+    fd->esync_fd   = NULL;
     fd->fsync_idx  = 0;
     init_async_queue( &fd->read_q );
     init_async_queue( &fd->write_q );
@@ -2263,10 +2263,10 @@ int default_fd_signaled( struct object *obj, struct wait_queue_entry *entry )
     return ret;
 }
 
-int default_fd_get_esync_fd( struct object *obj, enum esync_type *type )
+struct esync_fd *default_fd_get_esync_fd( struct object *obj, enum esync_type *type )
 {
     struct fd *fd = get_obj_fd( obj );
-    int ret = fd->esync_fd;
+    struct esync_fd *ret = fd->esync_fd;
     *type = ESYNC_MANUAL_SERVER;
     release_object( fd );
     return ret;

@@ -4227,12 +4227,18 @@ enum esync_type
     unsigned int shm_idx;       /* this object's index into the shm section */
 @END
 
-/* Retrieve the esync fd for an object. */
-@REQ(get_esync_fd)
+/* Retrieve the esync read fd for an object. */
+@REQ(get_esync_read_fd)
     obj_handle_t handle;        /* handle to the object */
 @REPLY
     int          type;
     unsigned int shm_idx;
+@END
+
+/* Retrieve the esync write fd for an object. */
+@REQ(get_esync_write_fd)
+    obj_handle_t handle;        /* handle to the object */
+@REPLY
 @END
 
 /* Notify the server that we are doing a message wait or done with one. */

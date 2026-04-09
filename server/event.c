@@ -55,20 +55,20 @@ struct type_descr event_type =
 
 struct event
 {
-    struct object  obj;             /* object header */
-    struct list    kernel_object;   /* list of kernel object pointers */
-    int            manual_reset;    /* is it a manual reset event? */
-    int            signaled;        /* event has been signaled */
-    unsigned int   msync_idx;
-    int            esync_fd;        /* esync file descriptor */
-    unsigned int   fsync_idx;
+    struct object   obj;             /* object header */
+    struct list     kernel_object;   /* list of kernel object pointers */
+    int             manual_reset;    /* is it a manual reset event? */
+    int             signaled;        /* event has been signaled */
+    unsigned int    msync_idx;
+    struct esync_fd *esync_fd;        /* esync file descriptor */
+    unsigned int    fsync_idx;
 };
 
 static void event_dump( struct object *obj, int verbose );
 static int event_signaled( struct object *obj, struct wait_queue_entry *entry );
 static void event_satisfied( struct object *obj, struct wait_queue_entry *entry );
 static unsigned int event_get_msync_idx( struct object *obj, enum msync_type *type );
-static int event_get_esync_fd( struct object *obj, enum esync_type *type );
+static struct esync_fd *event_get_esync_fd( struct object *obj, enum esync_type *type );
 static unsigned int event_get_fsync_idx( struct object *obj, enum fsync_type *type );
 static int event_signal( struct object *obj, unsigned int access);
 static struct list *event_get_kernel_obj_list( struct object *obj );
@@ -281,7 +281,7 @@ static int event_signaled( struct object *obj, struct wait_queue_entry *entry )
     return event->signaled;
 }
 
-static int event_get_esync_fd( struct object *obj, enum esync_type *type )
+static struct esync_fd *event_get_esync_fd( struct object *obj, enum esync_type *type )
 {
     struct event *event = (struct event *)obj;
     *type = event->manual_reset ? ESYNC_MANUAL_SERVER : ESYNC_AUTO_SERVER;
@@ -338,7 +338,7 @@ static void event_destroy( struct object *obj )
         msync_destroy_semaphore( event->msync_idx );
 
     if (do_esync())
-        close( event->esync_fd );
+        esync_close_fd( event->esync_fd );
 
     if (event->fsync_idx) fsync_free_shm_idx( event->fsync_idx );
 }

@@ -149,7 +149,7 @@ struct msg_queue
     const queue_shm_t     *shared;          /* queue in session shared memory */
     unsigned int           msync_idx;
     int                    msync_in_msgwait; /* our thread is currently waiting on us */
-    int                    esync_fd;        /* esync file descriptor (signalled on message) */
+    struct esync_fd       *esync_fd;        /* esync file descriptor (signalled on message) */
     int                    esync_in_msgwait; /* our thread is currently waiting on us */
     unsigned int           fsync_idx;
     int                    fsync_in_msgwait; /* our thread is currently waiting on us */
@@ -170,7 +170,7 @@ static int msg_queue_add_queue( struct object *obj, struct wait_queue_entry *ent
 static void msg_queue_remove_queue( struct object *obj, struct wait_queue_entry *entry );
 static unsigned int msg_queue_get_msync_idx( struct object *obj, enum msync_type *type );
 static int msg_queue_signaled( struct object *obj, struct wait_queue_entry *entry );
-static int msg_queue_get_esync_fd( struct object *obj, enum esync_type *type );
+static struct esync_fd *msg_queue_get_esync_fd( struct object *obj, enum esync_type *type );
 static unsigned int msg_queue_get_fsync_idx( struct object *obj, enum fsync_type *type );
 static void msg_queue_satisfied( struct object *obj, struct wait_queue_entry *entry );
 static void msg_queue_destroy( struct object *obj );
@@ -344,7 +344,7 @@ static struct msg_queue *create_msg_queue( struct thread *thread, struct thread_
         queue->keystate_lock   = 0;
         queue->msync_idx       = 0;
         queue->msync_in_msgwait = 0;
-        queue->esync_fd        = -1;
+        queue->esync_fd        = NULL;
         queue->esync_in_msgwait = 0;
         queue->fsync_idx       = 0;
         queue->fsync_in_msgwait = 0;
@@ -1376,7 +1376,7 @@ static int msg_queue_signaled( struct object *obj, struct wait_queue_entry *entr
     return ret || is_signaled( queue );
 }
 
-static int msg_queue_get_esync_fd( struct object *obj, enum esync_type *type )
+static struct esync_fd *msg_queue_get_esync_fd( struct object *obj, enum esync_type *type )
 {
     struct msg_queue *queue = (struct msg_queue *)obj;
     *type = ESYNC_QUEUE;
@@ -1455,7 +1455,7 @@ static void msg_queue_destroy( struct object *obj )
     if (queue->shared) free_shared_object( queue->shared );
     if (do_msync())
         msync_destroy_semaphore( queue->msync_idx );
-    if (do_esync()) close( queue->esync_fd );
+    if (do_esync()) esync_close_fd( queue->esync_fd );
     if (queue->fsync_idx) fsync_free_shm_idx( queue->fsync_idx );
 }
 

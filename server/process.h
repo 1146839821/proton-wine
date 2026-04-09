@@ -87,7 +87,7 @@ struct process
     struct list          kernel_object;   /* list of kernel object pointers */
     struct pe_image_info image_info;      /* main exe image info */
     unsigned int         msync_idx;
-    int                  esync_fd;        /* esync file descriptor (signaled on exit) */
+    struct esync_fd     *esync_fd;       /* esync file descriptor (signaled on exit) */
     unsigned int         fsync_idx;
     struct cpu_topology_override cpu_override; /* Overridden CPUs to host CPUs mapping. */
     unsigned char   wine_cpu_id_from_host[64]; /* Host to overridden CPU mapping. */

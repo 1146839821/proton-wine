@@ -608,8 +608,8 @@ const struct object_ops msync_ops =
     NULL,                      /* remove_queue */
     NULL,                      /* signaled */
     msync_get_msync_idx,       /* get_msync_idx */
-    NULL,                      /* get_fsync_idx */
     NULL,                      /* get_esync_idx */
+    NULL,                      /* get_fsync_idx */
     NULL,                      /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */

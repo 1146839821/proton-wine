@@ -167,7 +167,7 @@ static void completion_wait_satisfied( struct object *obj, struct wait_queue_ent
 
 static void completion_dump( struct object*, int );
 static int completion_signaled( struct object *obj, struct wait_queue_entry *entry );
-static int completion_get_esync_fd( struct object *obj, enum esync_type *type );
+static struct esync_fd *completion_get_esync_fd( struct object *obj, enum esync_type *type );
 static unsigned int completion_get_fsync_idx( struct object *obj, enum fsync_type *type );
 static int completion_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static void completion_destroy( struct object * );
@@ -204,7 +204,7 @@ static void completion_destroy( struct object *obj)
     struct completion *completion = (struct completion *) obj;
     struct comp_msg *tmp, *next;
 
-    if (do_esync()) close( completion->esync_fd );
+    if (do_esync()) esync_close_fd( completion->esync_fd );
     if (completion->fsync_idx) fsync_free_shm_idx( completion->fsync_idx );
 
     LIST_FOR_EACH_ENTRY_SAFE( tmp, next, &completion->queue, struct comp_msg, queue_entry )
@@ -228,7 +228,7 @@ static int completion_signaled( struct object *obj, struct wait_queue_entry *ent
     return !list_empty( &completion->queue ) || completion->closed;
 }
 
-static int completion_get_esync_fd( struct object *obj, enum esync_type *type )
+static struct esync_fd *completion_get_esync_fd( struct object *obj, enum esync_type *type )
 {
     struct completion *completion = (struct completion *)obj;
 

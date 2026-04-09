@@ -81,7 +81,7 @@ struct object_ops
     /* return the msync shm idx for this object */
     unsigned int (*get_msync_idx)(struct object *, enum msync_type *type);
     /* return the esync fd for this object */
-    int (*get_esync_fd)(struct object *, enum esync_type *type);
+    struct esync_fd *(*get_esync_fd)(struct object *, enum esync_type *type);
     /* return the fsync shm idx for this object */
     unsigned int (*get_fsync_idx)(struct object *, enum fsync_type *type);
     /* wait satisfied */

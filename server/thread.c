@@ -187,7 +187,7 @@ struct type_descr thread_type =
 static void dump_thread( struct object *obj, int verbose );
 static int thread_signaled( struct object *obj, struct wait_queue_entry *entry );
 static unsigned int thread_get_msync_idx( struct object *obj, enum msync_type *type );
-static int thread_get_esync_fd( struct object *obj, enum esync_type *type );
+static struct esync_fd *thread_get_esync_fd( struct object *obj, enum esync_type *type );
 static unsigned int thread_get_fsync_idx( struct object *obj, enum fsync_type *type );
 static unsigned int thread_map_access( struct object *obj, unsigned int access );
 static void thread_poll_event( struct fd *fd, int event );
@@ -293,7 +293,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->entry_point     = 0;
     thread->msync_idx       = 0;
     thread->msync_apc_idx   = 0;
-    thread->esync_fd        = -1;
+    thread->esync_fd        = NULL;
     thread->esync_apc_fd    = -1;
     thread->fsync_idx       = 0;
     thread->system_regs     = 0;
@@ -550,7 +550,7 @@ static void destroy_thread( struct object *obj )
     }
 
     if (do_esync())
-        close( thread->esync_fd );
+        esync_close_fd( thread->esync_fd );
     if (thread->fsync_idx)
     {
         fsync_free_shm_idx( thread->fsync_idx );
@@ -574,7 +574,7 @@ static int thread_signaled( struct object *obj, struct wait_queue_entry *entry )
     return (mythread->state == TERMINATED);
 }
 
-static int thread_get_esync_fd( struct object *obj, enum esync_type *type )
+static struct esync_fd *thread_get_esync_fd( struct object *obj, enum esync_type *type )
 {
     struct thread *thread = (struct thread *)obj;
     *type = ESYNC_MANUAL_SERVER;

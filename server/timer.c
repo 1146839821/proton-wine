@@ -65,14 +65,14 @@ struct timer
     client_ptr_t         callback;  /* callback APC function */
     client_ptr_t         arg;       /* callback argument */
     unsigned int         msync_idx; /* msync shm index */
-    int                  esync_fd;  /* esync file descriptor */
+    struct esync_fd     *esync_fd;  /* esync file descriptor */
     unsigned int         fsync_idx; /* fsync shm index */
 };
 
 static void timer_dump( struct object *obj, int verbose );
 static int timer_signaled( struct object *obj, struct wait_queue_entry *entry );
 static unsigned int timer_get_msync_idx( struct object *obj, enum msync_type *type );
-static int timer_get_esync_fd( struct object *obj, enum esync_type *type );
+static struct esync_fd *timer_get_esync_fd( struct object *obj, enum esync_type *type );
 static unsigned int timer_get_fsync_idx( struct object *obj, enum fsync_type *type );
 static void timer_satisfied( struct object *obj, struct wait_queue_entry *entry );
 static void timer_destroy( struct object *obj );
@@ -123,7 +123,7 @@ static struct timer *create_timer( struct object *root, const struct unicode_str
             timer->timeout  = NULL;
             timer->thread   = NULL;
             timer->msync_idx = 0;
-            timer->esync_fd = -1;
+            timer->esync_fd = NULL;
             timer->fsync_idx = 0;
 
             if (do_msync())
@@ -241,7 +241,7 @@ static int timer_signaled( struct object *obj, struct wait_queue_entry *entry )
     return timer->signaled;
 }
 
-static int timer_get_esync_fd( struct object *obj, enum esync_type *type )
+static struct esync_fd *timer_get_esync_fd( struct object *obj, enum esync_type *type )
 {
     struct timer *timer = (struct timer *)obj;
     *type = timer->manual ? ESYNC_MANUAL_SERVER : ESYNC_AUTO_SERVER;
@@ -278,7 +278,7 @@ static void timer_destroy( struct object *obj )
     if (timer->thread) release_object( timer->thread );
     if (do_msync())
         msync_destroy_semaphore( timer->msync_idx );
-    if (do_esync()) close( timer->esync_fd );
+    if (do_esync()) esync_close_fd( timer->esync_fd );
     if (timer->fsync_idx) fsync_free_shm_idx( timer->fsync_idx );
 }
 
