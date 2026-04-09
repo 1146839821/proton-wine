@@ -1446,15 +1446,18 @@ static NSString* WineLocalizedString(unsigned int stringID)
 
             {
                 static dispatch_once_t once;
-                static BOOL isSkyrimSE = FALSE;
+                static BOOL forceRelative = FALSE;
                 dispatch_once(&once, ^{
                     NSArray *args = [[NSProcessInfo processInfo] arguments];
                     NSString *allArgs = [args componentsJoinedByString:@" "];
                     if ([allArgs rangeOfString:@"SkyrimSE.exe" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                        isSkyrimSE = TRUE;
+                        forceRelative = TRUE;
+                    }
+                    if ([allArgs rangeOfString:@"ACC.exe" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                        forceRelative = TRUE;
                     }
                 });
-                if (isSkyrimSE) absolute = FALSE;
+                if (forceRelative) absolute = FALSE;
             }
 
             if (absolute)
