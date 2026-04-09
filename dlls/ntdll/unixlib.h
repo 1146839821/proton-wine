@@ -79,6 +79,12 @@ struct debugstr_pc_args
     unsigned int size;
 };
 
+struct pe_module_loaded_params
+{
+    void *start;
+    void *end;
+};
+
 enum ntdll_unix_funcs
 {
     unix_load_so_dll,
@@ -92,6 +98,9 @@ enum ntdll_unix_funcs
     unix_steamclient_setup_trampolines,
     unix_is_pc_in_native_so,
     unix_debugstr_pc,
+#if defined(__x86_64__)
+    unix_pe_module_loaded,
+#endif
 };
 
 extern unixlib_handle_t __wine_unixlib_handle;

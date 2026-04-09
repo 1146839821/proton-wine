@@ -2415,6 +2415,15 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
     TRACE_(loaddll)( "Loaded %s at %p: %s\n", debugstr_w(wm->ldr.FullDllName.Buffer), *module,
                      is_builtin ? "builtin" : "native" );
 
+    // Load gptk so
+#if defined(__x86_64__)
+    if (is_builtin == FALSE)
+    {
+	struct pe_module_loaded_params params = { *module, (void*)((BYTE*)*module + map_size) };
+	WINE_UNIX_CALL( unix_pe_module_loaded, &params );
+    }
+#endif
+
     wm->ldr.LoadCount = 1;
     *pwm = wm;
     *module = NULL;

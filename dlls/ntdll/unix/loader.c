@@ -1085,6 +1085,79 @@ static NTSTATUS load_so_dll( void *args )
     return status;
 }
 
+// Load Apple GPTK support library for non-native code regions
+#if defined(__APPLE__) && defined(__x86_64__)
+#include <sys/utsname.h>
+static pthread_once_t non_native_init_once = PTHREAD_ONCE_INIT;
+static void *non_native_support_lib;
+void *libd3dshared_load_addr = NULL, *libd3dshared_code_end = NULL;
+static void (*register_non_native_code_region)( void*, void* );
+static bool (*supports_non_native_code_regions)(void);
+
+/* Non-native code region support requires Sonoma or later, don't bother loading on earlier OSes */
+static BOOL sonoma_or_later(void)
+{
+    int result;
+    struct utsname name;
+    unsigned major, minor;
+
+    result = (uname( &name ) == 0 &&
+              sscanf( name.release, "%u.%u", &major, &minor ) == 2 &&
+              major >= 23 /* macOS 14 Sonoma */);
+
+    return (result == 1) ? TRUE : FALSE;
+}
+
+static void init_non_native_support(void)
+{
+    char *libd3dshared_path = getenv( "WINE_GPTK_LIBD3DSHARED_PATH" );
+
+    register_non_native_code_region = NULL;
+    supports_non_native_code_regions = NULL;
+
+    if (!libd3dshared_path || !sonoma_or_later())
+        return;
+
+    non_native_support_lib = dlopen( libd3dshared_path, RTLD_LOCAL );
+    if (non_native_support_lib)
+    {
+        Dl_info dli;
+
+        register_non_native_code_region = dlsym( non_native_support_lib, "register_non_native_code_region" );
+        supports_non_native_code_regions = dlsym( non_native_support_lib, "supports_non_native_code_regions" );
+
+        if (dladdr( supports_non_native_code_regions, &dli ))
+        {
+            unsigned long code_size;
+
+            libd3dshared_load_addr = dli.dli_fbase;
+            getsegmentdata(dli.dli_fbase, "__TEXT", &code_size);
+            libd3dshared_code_end = (char *)libd3dshared_load_addr + code_size;
+        }
+
+        TRACE( "Loaded libd3dshared.dylib, does%s support non-native code regions\n",
+                supports_non_native_code_regions ? (supports_non_native_code_regions() ? "" : " not") : " not" );
+    }
+    else
+        TRACE( "Loading libd3dshared.dylib failed: %s\n", dlerror() );
+}
+
+static NTSTATUS pe_module_loaded( void *args )
+{
+    struct pe_module_loaded_params *params = args;
+
+    pthread_once( &non_native_init_once, &init_non_native_support );
+    if ((supports_non_native_code_regions && supports_non_native_code_regions()))
+    {
+        TRACE( "Register non_native_code_region: %p-%p\n", params->start, params->end );
+        register_non_native_code_region( params->start, params->end );
+    }
+    return STATUS_SUCCESS;
+}
+#elif defined(__x86_64__)
+static NTSTATUS pe_module_loaded( void *args ) { return STATUS_NOT_IMPLEMENTED; }
+#endif
+
 static void *steamclient_srcs[128];
 static void *steamclient_tgts[128];
 static int steamclient_count;
