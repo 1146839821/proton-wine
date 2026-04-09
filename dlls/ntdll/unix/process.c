@@ -461,6 +461,19 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
             }
             argv = build_argv( &params->CommandLine, 2 );
 
+        /* CW Hack 24560: Don't advertise Vulkan extensions for Path of Exile 2 */
+#ifdef __APPLE__
+        {
+            static const WCHAR pathofexilesteamW[] = {'\\','P','a','t','h',' ','o','f',' ','E','x','i','l','e',' ','2','\\','P','a','t','h','O','f','E','x','i','l','e','S','t','e','a','m','.','e','x','e',0};
+            USHORT path_len = params->ImagePathName.Length / sizeof(WCHAR);
+            if (path_len >= ARRAY_SIZE(pathofexilesteamW) &&
+                !wcsicmp( params->ImagePathName.Buffer + path_len - ARRAY_SIZE(pathofexilesteamW) + 1, pathofexilesteamW ))
+            {
+                FIXME( "HACK: setting MVK_CONFIG_ADVERTISE_EXTENSIONS=0\n" );
+                setenv( "MVK_CONFIG_ADVERTISE_EXTENSIONS", "0", 1 );
+            }
+        }
+#endif
             exec_wineloader( argv, socketfd, pe_info );
             _exit(1);
         }
