@@ -314,6 +314,7 @@ static void __wine_dbg_ftrace_write( const char *str, unsigned int str_len )
 
 unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int str_size, unsigned int ctx )
 {
+#ifdef __LINUX__
     static unsigned int curr_ctx;
     unsigned int str_len;
     char ctx_str[64];
@@ -337,6 +338,9 @@ unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int str_size, unsigne
     }
     __wine_dbg_ftrace_write( str, str_len );
     return ctx;
+#else
+    return ~0u;
+#endif
 }
 
 #ifdef _WIN64
@@ -368,7 +372,9 @@ int __cdecl __wine_dbg_output( const char *str )
     {
         ret += append_output( info, str, end + 1 - str );
         write( 2, info->output, info->out_pos );
+#ifdef __LINUX__
         if (TRACE_ON(ftracelog)) __wine_dbg_ftrace_write( info->output, info->out_pos );
+#endif
         info->out_pos = 0;
         str = end + 1;
     }
