@@ -1239,6 +1239,14 @@ UINT macdrv_ImeProcessKey(HIMC himc, UINT wparam, UINT lparam, const BYTE *key_s
 
     if (!macdrv_using_input_method()) return 0;
 
+    if (!pressed)
+    {
+        /* Only key down events should be sent to the Cocoa input context. We do
+           not handle key ups, and instead let those go through as a normal
+           WM_KEYUP. */
+        return 0;
+    }
+
     switch (vkey)
     {
         case VK_SHIFT:
