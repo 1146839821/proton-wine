@@ -388,14 +388,14 @@ static void set_dll_path(void)
     dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
     count = 0;
 
-    if (!build_dir) dll_paths[count++] = dll_dir;
-
     if (path)
     {
         path = strdup(path);
         for (p = strtok( path, ":" ); p; p = strtok( NULL, ":" )) dll_paths[count++] = strdup( p );
         free( path );
     }
+
+    if (!build_dir) dll_paths[count++] = dll_dir;
 
     if (be_runtime)
     {
