@@ -23,6 +23,9 @@
 #include <errno.h>
 
 #include "ntstatus.h"
+#include "shlwapi.h"
+#include "windef.h"
+#include "winuser.h"
 #define WIN32_NO_STATUS
 #include "user_private.h"
 #include "controls.h"
@@ -712,6 +715,47 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
     return 0;
 }
 
+static void skip_dialog(HWND hwnd)
+{
+    if (GetEnvironmentVariableW(L"WINE_MSGBOX_IGNORED_CAPTION", NULL, 0))
+    {
+        WCHAR msgbox_caption[128];
+        WCHAR window_text[128];
+        GetEnvironmentVariableW(L"WINE_MSGBOX_IGNORED_CAPTION", msgbox_caption, 128);
+        GetWindowTextW(hwnd, window_text, 128);
+
+        if (StrStrW(msgbox_caption, window_text) != 0)
+        {
+            INT first_btn_id = 0;
+            HWND child_hwnd = GetWindow(hwnd, GW_CHILD);
+            while (child_hwnd)
+            {
+                char class_name[16];
+                GetClassNameA(child_hwnd, class_name, 16);
+                if (strcmp(class_name, "Button") == 0)
+                {
+                    if (first_btn_id == 0) first_btn_id = GetDlgCtrlID(child_hwnd);
+                    if (GetEnvironmentVariableW(L"WINE_MSGBOX_CLICK_YES", NULL, 0))
+                    {
+                        WARN("Clicking YES button for %s\n", debugstr_w(window_text));
+                        PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(child_hwnd), 0), (LPARAM)child_hwnd);
+                        break;
+                    }
+                    else if (GetEnvironmentVariableW(L"WINE_MSGBOX_CLICK_NO", NULL, 0))
+                    {
+                        if (GetDlgCtrlID(child_hwnd) == first_btn_id + 1)
+                        {
+                            WARN("Clicking NO button for %s\n", debugstr_w(window_text));
+                            PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(child_hwnd), 0), (LPARAM)child_hwnd);
+                            break;
+                        }
+                    }
+                }
+                child_hwnd = GetWindow(child_hwnd, GW_HWNDNEXT);
+            }
+        }
+    }
+}
 
 /***********************************************************************
  *		CreateDialogParamA (USER32.@)
@@ -750,7 +794,9 @@ HWND WINAPI CreateDialogIndirectParamAorW( HINSTANCE hInst, LPCVOID dlgTemplate,
                                            HWND owner, DLGPROC dlgProc, LPARAM param,
                                            DWORD flags )
 {
-    return DIALOG_CreateIndirect( hInst, dlgTemplate, owner, dlgProc, param, !flags, FALSE );
+    HWND hwnd = DIALOG_CreateIndirect( hInst, dlgTemplate, owner, dlgProc, param, !flags, FALSE );
+    if (dlgTemplate) skip_dialog(hwnd);
+    return hwnd;
 }
 
 /***********************************************************************

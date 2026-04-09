@@ -22,6 +22,7 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include "shlwapi.h"
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -522,6 +523,23 @@ INT WINAPI MessageBoxIndirectW( LPMSGBOXPARAMSW msgbox )
     int ret;
     UINT i;
     struct ThreadWindows threadWindows;
+
+    if (GetEnvironmentVariableW(L"WINE_MSGBOX_IGNORED_CAPTION", NULL, 0))
+    {
+        WCHAR msgbox_caption[256];
+        GetEnvironmentVariableW(L"WINE_MSGBOX_IGNORED_CAPTION", msgbox_caption, 256);
+        FIXME("skip_msgbox_caption = '%s'\n", debugstr_w(msgbox_caption));
+        if (StrStrW(msgbox_caption, msgbox->lpszCaption) != 0)
+        {
+            WARN("WINE_MSGBOX_IGNORED_CAPTION was set to '%s', the msgbox will be ignored: \n\t caption: %s\n\t text: %s\n",
+                  debugstr_w(msgbox_caption), debugstr_w(msgbox->lpszCaption), debugstr_w(msgbox->lpszText));
+            if (GetEnvironmentVariableW(L"WINE_MSGBOX_CLICK_YES", NULL, 0))
+                return IDOK;
+            else if (GetEnvironmentVariableW(L"WINE_MSGBOX_CLICK_NO", NULL, 0))
+                return IDCANCEL;
+            return IDOK;
+        }
+    }
 
     if (!(hRes = FindResourceExW(user32_module, (LPWSTR)RT_DIALOG, L"MSGBOX", msgbox->dwLanguageId)))
     {
