@@ -287,6 +287,11 @@ NTSTATUS demuxer_create( void *arg )
         if (!strcmp( ext, ".oga" ) || !strcmp( ext, ".opus" )) strcpy( params->mime_type, "audio/ogg" );
         else strcpy( params->mime_type, "video/ogg" );
     }
+    else if (strstr(format->name, "matroska" ))
+    {
+        if (!strcmp( ext, ".webm" )) strcpy(params->mime_type, "video/webm");
+        else strcpy(params->mime_type, "video/x-matroska");
+    }
     else
     {
         FIXME( "Unknown MIME type for format %s, url %s\n", debugstr_a(format->name), debugstr_a(params->url) );
