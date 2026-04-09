@@ -2609,10 +2609,24 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
 {
     void *ptr;
     int prot = get_unix_prot( vprot | VPROT_COMMITTED /* make sure it is accessible */ );
-    unsigned int flags = MAP_FIXED | ((vprot & VPROT_WRITECOPY) ? MAP_PRIVATE : MAP_SHARED);
+    unsigned int flags = MAP_FIXED;
 
     assert( start < view->size );
     assert( start + size <= view->size );
+
+    if (vprot & VPROT_WRITE) flags |= MAP_SHARED;
+    else if (vprot & VPROT_WRITECOPY) flags |= MAP_PRIVATE;
+    else
+    {
+        /* changes to the file are not guaranteed to be visible in read-only MAP_PRIVATE mappings,
+         * but they are on Linux so we take advantage of it */
+#ifdef __linux__
+        flags |= MAP_PRIVATE;
+#else
+        flags |= MAP_SHARED;
+        prot &= ~PROT_WRITE;
+#endif
+    }
 
     if (force_exec_prot && (vprot & VPROT_READ))
     {
@@ -2642,7 +2656,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
             break;
         case EACCES:
         case EPERM:  /* noexec filesystem, fall back to read() */
-            if (flags & MAP_SHARED)
+            if (vprot & VPROT_WRITE)
             {
                 if (prot & PROT_EXEC) ERR( "failed to set PROT_EXEC on file map, noexec filesystem?\n" );
                 return STATUS_ACCESS_DENIED;
