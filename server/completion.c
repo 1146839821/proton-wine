@@ -96,6 +96,7 @@ static const struct object_ops completion_wait_ops =
     add_queue,                      /* add_queue */
     remove_queue,                   /* remove_queue */
     completion_wait_signaled,       /* signaled */
+    NULL,                           /* get_msync_idx */
     NULL,                           /* get_esync_fd */
     NULL,                           /* get_fsync_idx */
     completion_wait_satisfied,      /* satisfied */
@@ -179,6 +180,7 @@ static const struct object_ops completion_ops =
     add_queue,                 /* add_queue */
     remove_queue,              /* remove_queue */
     completion_signaled,       /* signaled */
+    NULL,                      /* get_msync_idx */
     completion_get_esync_fd,   /* get_esync_fd */
     completion_get_fsync_idx,  /* get_fsync_idx */
     no_satisfied,              /* satisfied */

@@ -78,6 +78,7 @@ static const struct object_ops async_ops =
     add_queue,                 /* add_queue */
     remove_queue,              /* remove_queue */
     async_signaled,            /* signaled */
+    NULL,                      /* get_msync_idx */
     NULL,                      /* get_esync_fd */
     NULL,                      /* get_fsync_idx */
     async_satisfied,           /* satisfied */
@@ -700,6 +701,7 @@ static const struct object_ops iosb_ops =
     no_add_queue,             /* add_queue */
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
+    NULL,                     /* get_msync_idx */
     NULL,                     /* get_esync_fd */
     NULL,                     /* get_fsync_idx */
     NULL,                     /* satisfied */

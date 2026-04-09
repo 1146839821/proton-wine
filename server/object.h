@@ -78,6 +78,8 @@ struct object_ops
     void (*remove_queue)(struct object *,struct wait_queue_entry *);
     /* is object signaled? */
     int  (*signaled)(struct object *,struct wait_queue_entry *);
+    /* return the msync shm idx for this object */
+    unsigned int (*get_msync_idx)(struct object *, enum msync_type *type);
     /* return the esync fd for this object */
     int (*get_esync_fd)(struct object *, enum esync_type *type);
     /* return the fsync shm idx for this object */

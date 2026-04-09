@@ -181,6 +181,7 @@ static const struct object_ops key_ops =
     no_add_queue,            /* add_queue */
     NULL,                    /* remove_queue */
     NULL,                    /* signaled */
+    NULL,                    /* get_msync_idx */
     NULL,                    /* get_esync_fd */
     NULL,                    /* get_fsync_idx */
     NULL,                    /* satisfied */

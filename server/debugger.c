@@ -86,6 +86,7 @@ static const struct object_ops debug_event_ops =
     add_queue,                     /* add_queue */
     remove_queue,                  /* remove_queue */
     debug_event_signaled,          /* signaled */
+    NULL,                          /* get_msync_idx */
     NULL,                          /* get_esync_fd */
     NULL,                          /* get_fsync_idx */
     no_satisfied,                  /* satisfied */
@@ -116,6 +117,7 @@ static const struct object_ops debug_obj_ops =
     add_queue,                     /* add_queue */
     remove_queue,                  /* remove_queue */
     debug_obj_signaled,            /* signaled */
+    NULL,                          /* get_msync_idx */
     NULL,                          /* get_esync_fd */
     NULL,                          /* get_fsync_idx */
     no_satisfied,                  /* satisfied */

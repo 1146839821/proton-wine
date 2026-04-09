@@ -40,6 +40,7 @@
 #include "process.h"
 #include "esync.h"
 #include "fsync.h"
+#include "msync.h"
 
 /* IRP object */
 
@@ -68,6 +69,7 @@ static const struct object_ops irp_call_ops =
     no_add_queue,                     /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
+    NULL,                             /* get_msync_idx */
     NULL,                             /* get_esync_fd */
     NULL,                             /* satisfied */
     NULL,                             /* satisfied */
@@ -96,12 +98,14 @@ struct device_manager
     struct list            requests;       /* list of pending irps across all devices */
     struct irp_call       *current_call;   /* call currently executed on client side */
     struct wine_rb_tree    kernel_objects; /* map of objects that have client side pointer associated */
+    unsigned int           msync_idx;
     int                    esync_fd;       /* esync file descriptor */
     unsigned int           fsync_idx;
 };
 
 static void device_manager_dump( struct object *obj, int verbose );
 static int device_manager_signaled( struct object *obj, struct wait_queue_entry *entry );
+static unsigned int device_manager_get_msync_idx( struct object *obj, enum msync_type *type );
 static int device_manager_get_esync_fd( struct object *obj, enum esync_type *type );
 static unsigned int device_manager_get_fsync_idx( struct object *obj, enum fsync_type *type );
 static void device_manager_destroy( struct object *obj );
@@ -114,6 +118,7 @@ static const struct object_ops device_manager_ops =
     add_queue,                        /* add_queue */
     remove_queue,                     /* remove_queue */
     device_manager_signaled,          /* signaled */
+    device_manager_get_msync_idx,     /* get_msync_idx */
     device_manager_get_esync_fd,      /* get_esync_fd */
     device_manager_get_fsync_idx,     /* get_fsync_idx */
     no_satisfied,                     /* satisfied */
@@ -173,6 +178,7 @@ static const struct object_ops device_ops =
     no_add_queue,                     /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
+    NULL,                             /* get_msync_idx */
     NULL,                             /* get_esync_fd */
     NULL,                             /* get_fsync_idx */
     no_satisfied,                     /* satisfied */
@@ -227,6 +233,7 @@ static const struct object_ops device_file_ops =
     add_queue,                        /* add_queue */
     remove_queue,                     /* remove_queue */
     default_fd_signaled,              /* signaled */
+    NULL,                             /* get_msync_idx */
     NULL,                             /* get_esync_fd */
     NULL,                             /* get_fsync_idx */
     no_satisfied,                     /* satisfied */
@@ -762,6 +769,9 @@ static void delete_file( struct device_file *file )
     /* terminate all pending requests */
     LIST_FOR_EACH_ENTRY_SAFE( irp, next, &file->requests, struct irp_call, dev_entry )
     {
+        if (do_msync() && file->device->manager && list_empty( &file->device->manager->requests ))
+            msync_clear( &file->device->manager->obj );
+
         if (do_fsync() && file->device->manager && list_empty( &file->device->manager->requests ))
             fsync_clear( &file->device->manager->obj );
 
@@ -817,6 +827,13 @@ static unsigned int device_manager_get_fsync_idx( struct object *obj, enum fsync
     return manager->fsync_idx;
 }
 
+static unsigned int device_manager_get_msync_idx( struct object *obj, enum msync_type *type )
+{
+    struct device_manager *manager = (struct device_manager *)obj;
+    *type = MSYNC_MANUAL_SERVER;
+    return manager->msync_idx;
+}
+
 static void device_manager_destroy( struct object *obj )
 {
     struct device_manager *manager = (struct device_manager *)obj;
@@ -852,6 +869,9 @@ static void device_manager_destroy( struct object *obj )
         release_object( irp );
     }
 
+    if (do_msync())
+        msync_destroy_semaphore( manager->msync_idx );
+
     if (do_esync())
         close( manager->esync_fd );
     if (manager->fsync_idx) fsync_free_shm_idx( manager->fsync_idx );
@@ -868,6 +888,9 @@ static struct device_manager *create_device_manager(void)
         list_init( &manager->requests );
         wine_rb_init( &manager->kernel_objects, compare_kernel_object );
         manager->fsync_idx = 0;
+
+        if (do_msync())
+            manager->msync_idx = msync_alloc_shm( 0, 0 );
 
         if (do_fsync())
             manager->fsync_idx = fsync_alloc_shm( 0, 0 );
@@ -1063,6 +1086,9 @@ DECL_HANDLER(get_next_device_request)
                 /* we already own the object if it's only on manager queue */
                 if (irp->file) grab_object( irp );
                 manager->current_call = irp;
+
+                if (do_msync() && list_empty( &manager->requests ))
+                    msync_clear( &manager->obj );
 
                 if (do_fsync() && list_empty( &manager->requests ))
                     fsync_clear( &manager->obj );

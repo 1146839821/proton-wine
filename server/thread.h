@@ -56,6 +56,8 @@ struct thread
     struct process        *process;
     thread_id_t            id;            /* thread id */
     struct list            mutex_list;    /* list of currently owned mutexes */
+    unsigned int           msync_idx;
+    unsigned int           msync_apc_idx;
     int                    esync_fd;      /* esync file descriptor (signalled on exit) */
     int                    esync_apc_fd;  /* esync apc fd (signalled when APCs are present) */
     unsigned int           fsync_idx;
