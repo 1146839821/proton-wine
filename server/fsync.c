@@ -150,6 +150,7 @@ const struct object_ops fsync_ops =
     no_add_queue,              /* add_queue */
     NULL,                      /* remove_queue */
     NULL,                      /* signaled */
+    NULL,                      /* get_msync_idx */
     NULL,                      /* get_esync_fd */
     fsync_get_fsync_idx,       /* get_fsync_idx */
     NULL,                      /* satisfied */
