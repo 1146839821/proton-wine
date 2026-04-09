@@ -122,7 +122,7 @@ static struct timer *create_timer( struct object *root, const struct unicode_str
             timer->period   = 0;
             timer->timeout  = NULL;
             timer->thread   = NULL;
-            timer->esync_idx = 0;
+            timer->msync_idx = 0;
             timer->esync_fd = -1;
             timer->fsync_idx = 0;
 
