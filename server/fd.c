@@ -380,28 +380,49 @@ static void atomic_store_long(volatile LONG *ptr, LONG value)
 #endif
 }
 
+static int get_timezone_bias( time_t now, timeout_t *bias )
+{
+#ifdef __APPLE__
+    struct timeval tv;
+    struct timezone tz;
+
+    (void)now;
+    if (gettimeofday( &tv, &tz )) return 0;
+    *bias = (timeout_t)tz.tz_minuteswest * 60;
+    return 1;
+#else
+    struct tm *tm;
+
+    tm = gmtime( &now );
+    if (!tm) return 0;
+    *bias = mktime( tm ) - now;
+    tm = localtime( &now );
+    if (!tm) return 0;
+    if (tm->tm_isdst) *bias -= 3600;
+    return 1;
+#endif
+}
+
 static void set_user_shared_data_time(void)
 {
     timeout_t tick_count = monotonic_time / 10000;
     static timeout_t last_timezone_update;
     timeout_t timezone_bias;
-    struct tm *tm;
     time_t now;
 
     if (monotonic_time - last_timezone_update > TICKS_PER_SEC)
     {
         now = time( NULL );
-        tm = gmtime( &now );
-        timezone_bias = mktime( tm ) - now;
-        tm = localtime( &now );
-        if (tm->tm_isdst) timezone_bias -= 3600;
-        timezone_bias *= TICKS_PER_SEC;
+        if (get_timezone_bias( now, &timezone_bias ))
+        {
+            timezone_bias *= TICKS_PER_SEC;
 
-        atomic_store_long(&user_shared_data->TimeZoneBias.High2Time, timezone_bias >> 32);
-        atomic_store_ulong(&user_shared_data->TimeZoneBias.LowPart, timezone_bias);
-        atomic_store_long(&user_shared_data->TimeZoneBias.High1Time, timezone_bias >> 32);
+            atomic_store_long(&user_shared_data->TimeZoneBias.High2Time, timezone_bias >> 32);
+            atomic_store_ulong(&user_shared_data->TimeZoneBias.LowPart, timezone_bias);
+            atomic_store_long(&user_shared_data->TimeZoneBias.High1Time, timezone_bias >> 32);
 
-        last_timezone_update = monotonic_time;
+            last_timezone_update = monotonic_time;
+        }
     }
 
     atomic_store_long(&user_shared_data->SystemTime.High2Time, current_time >> 32);
