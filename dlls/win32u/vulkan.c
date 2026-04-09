@@ -1586,9 +1586,10 @@ static const struct vulkan_driver_funcs lazydrv_funcs =
 
 static void vulkan_init_once(void)
 {
-    if (!(vulkan_handle = dlopen( SONAME_LIBVULKAN, RTLD_NOW )))
+    const char* libvulkan = getenv("WINE_SONAME_LIBVULKAN");
+    if (!(vulkan_handle = dlopen( libvulkan ? libvulkan : SONAME_LIBVULKAN, RTLD_NOW )))
     {
-        ERR( "Failed to load %s\n", SONAME_LIBVULKAN );
+        ERR( "Failed to load %s\n", libvulkan ? libvulkan : SONAME_LIBVULKAN );
         return;
     }
 
