@@ -170,7 +170,7 @@ static void constrain_window_frame(CGPoint* origin, CGSize* size)
 /***********************************************************************
  *              alloc_win_data
  */
-static struct macdrv_win_data *alloc_win_data(HWND hwnd)
+struct macdrv_win_data *alloc_win_data(HWND hwnd)
 {
     struct macdrv_win_data *data;
 

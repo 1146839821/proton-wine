@@ -1551,8 +1551,22 @@ static BOOL set_pixel_format(HDC hdc, int fmt, BOOL internal)
 
     if (!(data = get_win_data(hwnd)))
     {
-        FIXME("DC for window %p of other process: not implemented\n", hwnd);
-        return FALSE;
+        if (NtUserGetWindowThread(hwnd, NULL) == GetCurrentThreadId())
+        {
+            /* Some apps perform graphics operations (dirty work) on message-only windows.
+               （like Civilization VI’s Launchpad.exe) Lazy-allocate win_data here as a workaround. */
+            data = alloc_win_data(hwnd);
+            if (!data)
+            {
+                FIXME("deferred alloc window data for window %p failed\n", hwnd);
+                return FALSE;
+            }
+        }
+        else
+        {
+            FIXME("DC for window %p of other process: not implemented\n", hwnd);
+            return FALSE;
+        }
     }
 
     /* Check if fmt is in our list of supported formats to see if it is supported. */

@@ -263,6 +263,8 @@ extern void init_user_driver(void);
 
 extern struct format_entry *get_format_entries(CFTypeRef pasteboard, UINT *entries_size);
 
+extern struct macdrv_win_data *alloc_win_data(HWND hwnd);
+
 /* user helpers */
 
 static inline LRESULT send_message(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
