@@ -752,6 +752,25 @@ DWORD WINAPI GetFileVersionInfoSizeA( LPCSTR filename, LPDWORD handle )
     return GetFileVersionInfoSizeExA( FILE_VER_GET_LOCALISED, filename, handle );
 }
 
+/* CW Hack 24309 */
+static BOOL needs_manor_lords_hack(const WCHAR *dll)
+{
+    static int is_manor_lords = -1;
+    WCHAR path[MAX_PATH], *appname = path, *p;
+    if (is_manor_lords == -1)
+    {
+        if (GetModuleFileNameW(NULL, path, MAX_PATH))
+        {
+            if ((p = wcsrchr(path, '/'))) appname = p + 1;
+            if ((p = wcsrchr(path, '\\'))) appname = p + 1;
+            is_manor_lords = !wcsicmp(appname, L"ManorLords.exe");
+        }
+        else
+            is_manor_lords = 0;
+    }
+    return is_manor_lords &&
+           (!wcscmp(dll, L"msvcp140_2.dll") || !wcscmp(dll, L"vcruntime140_1.dll"));
+}
 /******************************************************************************
  *           GetFileVersionInfoSizeExW       (kernelbase.@)
  */
@@ -759,6 +778,7 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD r
 {
     DWORD len, offset, magic = 1;
     HMODULE hModule;
+    BOOL manor_lords_hack = needs_manor_lords_hack(filename);  /* CW Hack 24309 */
 
     TRACE("(0x%lx,%s,%p)\n", flags, debugstr_w(filename), ret_handle );
 
@@ -777,7 +797,7 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD r
     if (flags & ~FILE_VER_GET_LOCALISED)
         FIXME("flags 0x%lx ignored\n", flags & ~FILE_VER_GET_LOCALISED);
 
-    if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_IMAGE_RESOURCE )))
+    if (!manor_lords_hack && (hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_IMAGE_RESOURCE )))
     {
         HRSRC hRsrc = NULL;
 
@@ -822,7 +842,15 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD r
     }
     else
     {
-        HANDLE handle = CreateFileW( filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        HANDLE handle;
+        WCHAR hacked_filename[MAX_PATH];
+        if (manor_lords_hack)
+        {
+            wcscpy(hacked_filename, L"c:\\windows\\system32\\");
+            wcscat(hacked_filename, filename);
+            filename = hacked_filename;
+        }
+        handle = CreateFileW( filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                      NULL, OPEN_EXISTING, 0, 0 );
         if (handle == INVALID_HANDLE_VALUE) return 0;
         magic = find_version_resource( handle, &len, &offset, flags );
@@ -894,6 +922,7 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD ignored,
     DWORD len, offset, magic = 1;
     HMODULE hModule;
     VS_VERSION_INFO_STRUCT32* vvis = data;
+    BOOL manor_lords_hack = needs_manor_lords_hack(filename);  /* CW Hack 24309 */
 
     TRACE("(0x%lx,%s,%ld,size=%ld,data=%p)\n",
           flags, debugstr_w(filename), ignored, datasize, data );
@@ -906,7 +935,7 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD ignored,
     if (flags & ~FILE_VER_GET_LOCALISED)
         FIXME("flags 0x%lx ignored\n", flags & ~FILE_VER_GET_LOCALISED);
 
-    if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_IMAGE_RESOURCE )))
+    if (!manor_lords_hack && (hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_IMAGE_RESOURCE )))
     {
         HRSRC hRsrc = NULL;
         if (!(flags & FILE_VER_GET_LOCALISED))
@@ -930,7 +959,15 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD ignored,
     }
     else
     {
-        HANDLE handle = CreateFileW( filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        HANDLE handle;
+        WCHAR hacked_filename[MAX_PATH];
+        if (manor_lords_hack)
+        {
+            wcscpy(hacked_filename, L"c:\\windows\\system32\\");
+            wcscat(hacked_filename, filename);
+            filename = hacked_filename;
+        }
+        handle = CreateFileW( filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                      NULL, OPEN_EXISTING, 0, 0 );
         if (handle == INVALID_HANDLE_VALUE) return 0;
         if ((magic = find_version_resource( handle, &len, &offset, flags )))
