@@ -5305,6 +5305,21 @@ static void virtual_release_address_space(void)
 {
 #ifndef __APPLE__  /* On macOS, we still want to free some of low memory, for OpenGL resources */
     if (user_space_limit > (void *)limit_2g) return;
+#else /* CrossOver Hack #16371 */
+    {
+        char buf[1024], *p;
+        uint32_t size = sizeof(buf);
+        if (_NSGetExecutablePath(buf, &size) == 0)
+        {
+            if ((p = strrchr(buf, '/'))) ++p;
+            else p = buf;
+            if (!strcasestr(p, "preloader"))
+            {
+                free_reserved_memory( (char *)0x40001000, (char *)0x7f000000 );
+                return;
+            }
+        }
+    }
 #endif
     free_reserved_memory( (char *)0x20000000, (char *)0x7f000000 );
 }
