@@ -645,7 +645,26 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetDiskFreeSpaceExW( LPCWSTR root, PULARGE_INTEGER
 
     TRACE( "%s,%p,%p,%p\n", debugstr_w(root), avail, total, totalfree );
 
-    if (!open_device_root( root, &handle )) return FALSE;
+    if (!open_device_root( root, &handle )) {
+        const ULONGLONG HACK_FREE_SIZE  = 200ull * 1024 * 1024 * 1024; /* 200 GB */
+        const ULONGLONG HACK_TOTAL_SIZE = 400ull * 1024 * 1024 * 1024; /* 400 GB */
+
+        if (total) {
+            total->QuadPart = HACK_TOTAL_SIZE;
+            WARN("Hacking Total = %I64u\n", total->QuadPart);
+        }
+
+        if (totalfree) {
+            totalfree->QuadPart = HACK_FREE_SIZE;
+            WARN("Hacking TotalFree = %I64u\n", totalfree->QuadPart);
+        }
+
+        if (avail) {
+            avail->QuadPart = HACK_FREE_SIZE;
+            WARN("Hacking Avail = %I64u\n", avail->QuadPart);
+        }
+        return TRUE;
+    }
 
     status = NtQueryVolumeInformationFile( handle, &io, &info, sizeof(info), FileFsSizeInformation );
     NtClose( handle );
