@@ -1033,7 +1033,8 @@ static void load_steam_overlay(const char *unix_lib_path)
     p = preload;
     while (*(preload = p))
     {
-        p = strchrnul( preload, ':' );
+        p = strchr( preload, ':' );
+        if (!p) p = preload + strlen(preload);
         len = p - preload;
         if (*p) ++p;
         if (len + 1 > sizeof(path)) continue;
