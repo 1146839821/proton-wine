@@ -1627,21 +1627,6 @@ static NTSTATUS find_builtin_dll( UNICODE_STRING *nt_name, void **module, SIZE_T
             status = open_builtin_so_file( ptr, &attr, module, image_info, prefer_native );
             if (status != STATUS_DLL_NOT_FOUND) goto done;
         }
-        file[pos + len + 1] = 0;
-        ptr = prepend( file + pos, dll_paths[i], strlen(dll_paths[i]) );
-        status = open_builtin_pe_file( ptr, &attr, module, size_ptr, image_info, limit_low, limit_high,
-                                       load_machine, prefer_native );
-        if (status == STATUS_NOT_SUPPORTED)
-        {
-            found_image = TRUE;
-            continue;
-        }
-        if (status != STATUS_DLL_NOT_FOUND) goto done;
-        if (!try_so) continue;
-        strcpy( file + pos + len + 1, ".so" );
-        status = open_builtin_so_file( ptr, &attr, module, image_info, prefer_native );
-        if (status == STATUS_NOT_SUPPORTED) found_image = TRUE;
-        else if (status != STATUS_DLL_NOT_FOUND) goto done;
     }
 
     if (found_image) status = STATUS_NOT_SUPPORTED;
