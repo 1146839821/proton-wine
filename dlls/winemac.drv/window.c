@@ -1359,6 +1359,20 @@ void macdrv_SetDesktopWindow(HWND hwnd)
         SERVER_END_REQ;
     }
 
+    /* CW Hack #26536 */
+    {
+        static const WCHAR helldivers2_exeW[] = {'\\','h','e','l','l','d','i','v','e','r','s','2','.','e','x','e',0};
+        WCHAR *path = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+        size_t suffix_len = ARRAY_SIZE(helldivers2_exeW) - 1, path_len = wcslen(path);
+        if (path_len > suffix_len && !wcsicmp(path + path_len - suffix_len, helldivers2_exeW))
+        {
+            static pthread_once_t app_icon_once = PTHREAD_ONCE_INIT;
+            ERR("HACK: only doing set_app_icon once for Helldivers 2\n");
+            pthread_once(&app_icon_once, set_app_icon);
+            return;
+        }
+    }
+
     set_app_icon();
 }
 
