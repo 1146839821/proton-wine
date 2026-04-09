@@ -509,6 +509,87 @@ static const WCHAR *skip_unc_prefix( const WCHAR *ptr )
 
 
 /******************************************************************
+ *		get_unix_full_path
+ *
+ * Get a full path for a Unix path name. Helper for RtlGetFullPathName_UEx.
+ */
+static BOOL get_unix_full_path( LPCWSTR name, LPWSTR buffer, ULONG size, ULONG *reqsize )
+{
+    WCHAR *nt_str;
+    NTSTATUS status;
+    UNICODE_STRING str;
+    OBJECT_ATTRIBUTES attr;
+    HANDLE handle;
+    IO_STATUS_BLOCK io;
+    BOOL ret = FALSE;
+    WCHAR *file;
+    ULONG file_len = 0;
+
+    nt_str = RtlAllocateHeap( GetProcessHeap(), 0, (wcslen(name) + 9) * sizeof(WCHAR) );
+    wcscpy( nt_str, L"\\??\\unix" );
+    wcscat( nt_str, name );
+    for (file = nt_str; *file; file++) if (*file == '/') *file = '\\';
+    RtlInitUnicodeString( &str, nt_str );
+    InitializeObjectAttributes( &attr, &str, 0, 0, NULL );
+
+    status = NtOpenFile( &handle, GENERIC_READ, &attr, &io, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                         FILE_SYNCHRONOUS_IO_NONALERT );
+    if (status)
+    {
+        ULONG i = str.Length / sizeof(WCHAR) - 1;
+        while (i && str.Buffer[i] != '\\') i--;
+        file = str.Buffer + i;
+        file_len = str.Length - i * sizeof(WCHAR);
+        while (i && str.Buffer[i] == '\\') i--;
+        if (i > 9)
+        {
+            str.Length = (i + 1) * sizeof(WCHAR);
+            status = NtOpenFile( &handle, GENERIC_READ, &attr, &io, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                 FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT );
+        }
+    }
+
+    if (!status)
+    {
+        ULONG retsize, bufsize = sizeof(OBJECT_NAME_INFORMATION) + size + 4 * sizeof(WCHAR);
+        OBJECT_NAME_INFORMATION *info = RtlAllocateHeap( GetProcessHeap(), 0, bufsize );
+
+        if (!(status = NtQueryObject( handle, ObjectNameInformation, info, bufsize, &retsize )))
+        {
+            ULONG len = info->Name.Length;
+            WCHAR *name = info->Name.Buffer;
+
+            if (len >= 6 * sizeof(WCHAR) && name[5] == ':')
+            {
+                len -= 4 * sizeof(WCHAR);
+                name += 4;
+            }
+            else name[1] = '\\';
+
+            *reqsize = len + file_len + sizeof(WCHAR);
+            if (*reqsize <= size)
+            {
+                memcpy( buffer, name, len );
+                memcpy( buffer + len / sizeof(WCHAR), file, file_len + sizeof(WCHAR) );
+                *reqsize -= sizeof(WCHAR);
+            }
+            ret = TRUE;
+        }
+        else if (status == STATUS_BUFFER_OVERFLOW)
+        {
+            retsize -= sizeof(OBJECT_NAME_INFORMATION) - 4 * sizeof(WCHAR);
+            *reqsize = retsize + file_len;
+            ret = TRUE;
+        }
+        RtlFreeHeap( GetProcessHeap(), 0, info );
+        NtClose( handle );
+    }
+    RtlFreeHeap( GetProcessHeap(), 0, nt_str );
+    return ret;
+}
+
+
+/******************************************************************
  *		get_full_path_helper
  *
  * Helper for RtlGetFullPathName_U
@@ -541,6 +622,10 @@ static ULONG get_full_path_helper(LPCWSTR name, LPWSTR buffer, ULONG size)
         break;
 
     case DEVICE_PATH:           /* \\.\foo */
+        if (!wcsncmp( name + 4, L"unix", 4 ) && IS_SEPARATOR(name[8]) &&
+            get_unix_full_path( name + 8, buffer, size, &reqsize ))
+            goto done;
+
         mark = 4;
         break;
 
@@ -612,44 +697,9 @@ static ULONG get_full_path_helper(LPCWSTR name, LPWSTR buffer, ULONG size)
         else mark = 3;
         break;
 
-    case ABSOLUTE_PATH:         /* \xxx    */
-        if (name[0] == '/')  /* may be a Unix path */
-        {
-            char *unix_name;
-            WCHAR *nt_str;
-            ULONG buflen;
-            NTSTATUS status;
-            UNICODE_STRING str;
-            OBJECT_ATTRIBUTES attr;
+    case ABSOLUTE_PATH:     /* \xxx    */
+        if (name[0] == '/' && get_unix_full_path( name, buffer, size, &reqsize )) goto done;
 
-            nt_str = RtlAllocateHeap( GetProcessHeap(), 0, (wcslen(name) + 9) * sizeof(WCHAR) );
-            wcscpy( nt_str, L"\\??\\unix" );
-            wcscat( nt_str, name );
-            RtlInitUnicodeString( &str, nt_str );
-            InitializeObjectAttributes( &attr, &str, 0, 0, NULL );
-            buflen = 3 * wcslen(name) + 1;
-            unix_name = RtlAllocateHeap( GetProcessHeap(), 0, buflen );
-            status = wine_nt_to_unix_file_name( &attr, unix_name, &buflen, FILE_OPEN_IF );
-            if (!status || status == STATUS_NO_SUCH_FILE)
-            {
-                buflen = wcslen(name) + 9;
-                status = wine_unix_to_nt_file_name( unix_name, nt_str, &buflen );
-            }
-            RtlFreeHeap( GetProcessHeap(), 0, unix_name );
-            if (!status && buflen > 6 && nt_str[5] == ':')
-            {
-                reqsize = (buflen - 4) * sizeof(WCHAR);
-                if (reqsize <= size)
-                {
-                    memcpy( buffer, nt_str + 4, reqsize );
-                    collapse_path( buffer, 3 );
-                    reqsize -= sizeof(WCHAR);
-                }
-                RtlFreeHeap( GetProcessHeap(), 0, nt_str );
-                goto done;
-            }
-            RtlFreeHeap( GetProcessHeap(), 0, nt_str );
-        }
         if (cd->Buffer[1] == ':')
         {
             reqsize = 2 * sizeof(WCHAR);
@@ -719,15 +769,38 @@ done:
 DWORD WINAPI RtlGetFullPathName_U(const WCHAR* name, ULONG size, WCHAR* buffer,
                                   WCHAR** file_part)
 {
-    WCHAR*      ptr;
-    DWORD       dosdev;
-    DWORD       reqsize;
+    TRACE("(%s %lu %p %p)\n", debugstr_w(name), size, buffer, file_part);
+
+    return RtlGetFullPathName_UEx(name, size, buffer, file_part, NULL);
+}
+
+
+/******************************************************************
+ *		RtlGetFullPathName_UEx  (NTDLL.@)
+ *
+ * Returns the number of bytes written to buffer (not including the
+ * terminating NULL) if the function succeeds, or the required number of bytes
+ * (including the terminating NULL) if the buffer is too small.
+ *
+ * file_part will point to the filename part inside buffer (except if we use
+ * DOS device name, in which case file_in_buf is NULL)
+ *
+ * type is an optional parameter that will receive the type of the path
+ *
+ */
+ULONG WINAPI RtlGetFullPathName_UEx(const WCHAR* name, ULONG size, WCHAR* buffer,
+                                    WCHAR** file_part, DOS_PATHNAME_TYPE* type)
+{
+    WCHAR*          ptr;
+    DWORD           dosdev;
+    DWORD           reqsize;
 
     TRACE("(%s %lu %p %p)\n", debugstr_w(name), size, buffer, file_part);
 
     if (!name || !*name) return 0;
 
     if (file_part) *file_part = NULL;
+    if (type) *type = RtlDetermineDosPathNameType_U(name);
 
     /* check for DOS device name */
     dosdev = RtlIsDosDeviceName_U(name);
