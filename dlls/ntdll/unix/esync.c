@@ -985,7 +985,7 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
             return ret;
     }
 
-    if (objs[count - 1] && objs[count - 1]->type == ESYNC_QUEUE)
+    if (count && objs[count - 1] && objs[count - 1]->type == ESYNC_QUEUE)
         msgwait = TRUE;
 
     if (has_esync && has_server)
