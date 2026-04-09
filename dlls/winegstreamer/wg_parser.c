@@ -36,7 +36,9 @@
 #include <gst/audio/audio.h>
 #include <gst/tag/tag.h>
 
+#ifndef __APPLE__
 #include <gst/gl/gl.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -45,8 +47,9 @@
 
 #include "unix_private.h"
 
+#ifndef __APPLE__
 extern GstGLDisplay *gl_display;
-
+#endif
 typedef enum
 {
     GST_AUTOPLUG_SELECT_TRY,
@@ -2069,6 +2072,7 @@ static NTSTATUS wg_parser_create(void *args)
 
     if (!(parser = calloc(1, sizeof(*parser))))
         return E_OUTOFMEMORY;
+#ifndef __APPLE__
     if ((parser->use_opengl = params->use_opengl && gl_display))
     {
         if ((parser->context = gst_context_new(GST_GL_DISPLAY_CONTEXT_TYPE, false)))
@@ -2079,6 +2083,7 @@ static NTSTATUS wg_parser_create(void *args)
             parser->use_opengl = FALSE;
         }
     }
+#endif
     if (!(parser->task_pool = wg_task_pool_new()))
     {
         free(parser);

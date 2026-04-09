@@ -30,7 +30,10 @@
 
 #define GLIB_VERSION_MIN_REQUIRED GLIB_VERSION_2_30
 #include <gst/gst.h>
+
+#ifndef __APPLE__
 #include <gst/gl/gl.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -47,7 +50,9 @@
 GST_DEBUG_CATEGORY(wine);
 
 static UINT thread_count;
+#ifndef __APPLE__
 GstGLDisplay *gl_display;
+#endif
 
 GstStreamType stream_type_from_caps(GstCaps *caps)
 {
@@ -259,7 +264,9 @@ static ULONG popcount(ULONG val)
 
 NTSTATUS wg_init_gstreamer(void *arg)
 {
+#ifndef __APPLE__
     static GstGLContext *gl_context;
+#endif
 
     struct wg_init_gstreamer_params *params = arg;
     char arg0[] = "wine";
@@ -321,7 +328,7 @@ NTSTATUS wg_init_gstreamer(void *arg)
 
     GST_INFO("GStreamer library version %s; wine built with %d.%d.%d.",
             gst_version_string(), GST_VERSION_MAJOR, GST_VERSION_MINOR, GST_VERSION_MICRO);
-
+    #ifndef __APPLE__
     if (!(gl_display = gst_gl_display_new()))
         GST_ERROR("Failed to create OpenGL display");
     else
@@ -343,7 +350,7 @@ NTSTATUS wg_init_gstreamer(void *arg)
             gl_display = NULL;
         }
     }
-
+    #endif
     if (!media_converter_init())
     {
         GST_ERROR("Failed to init media converter.");
