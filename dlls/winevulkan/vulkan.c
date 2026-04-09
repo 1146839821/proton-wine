@@ -32,6 +32,9 @@
 #ifdef HAVE_SYS_SYSCALL_H
 # include <sys/syscall.h>
 #endif
+#ifdef __APPLE__
+# include <mach/mach.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -3587,8 +3590,12 @@ signal_op_complete:
 
 void *signaller_worker(void *arg)
 {
-#ifdef HAVE_SYS_SYSCALL_H
+#if defined(HAVE_SYS_SYSCALL_H) && defined(__NR_gettid)
     int unix_tid = syscall( __NR_gettid );
+#elif defined(__APPLE__)
+    /* On macOS, use mach_thread_self to get thread ID */
+    int unix_tid = (int)mach_thread_self();
+    mach_port_deallocate(mach_task_self(), unix_tid);
 #else
     int unix_tid = -1;
 #endif
