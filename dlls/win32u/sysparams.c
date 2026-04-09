@@ -163,8 +163,8 @@ static INT64 last_query_display_time;
 static UINT64 monitor_update_serial;
 static pthread_mutex_t display_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static BOOL emulate_modelist = TRUE;
-static BOOL emulate_modeset = TRUE;
+static BOOL emulate_modelist;
+static BOOL emulate_modeset;
 static UINT limit_resolutions = 0;
 BOOL decorated_mode = TRUE;
 UINT64 thunk_lock_callback = 0;
@@ -5696,9 +5696,9 @@ void sysparams_init(void)
     if (!get_config_key( hkey, appkey, "Decorated", buffer, sizeof(buffer) ))
         decorated_mode = IS_OPTION_TRUE( buffer[0] );
     if (!get_config_key( hkey, appkey, "EmulateModelist", buffer, sizeof(buffer) ))
-        emulate_modelist = !IS_OPTION_TRUE( buffer[0] );
+        emulate_modelist = IS_OPTION_TRUE( buffer[0] );
     if (!get_config_key( hkey, appkey, "EmulateModeset", buffer, sizeof(buffer) ))
-        emulate_modeset = !IS_OPTION_TRUE( buffer[0] );
+        emulate_modeset = IS_OPTION_TRUE( buffer[0] );
 
     {
         const char *s;
