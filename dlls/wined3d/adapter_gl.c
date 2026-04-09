@@ -3776,6 +3776,27 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter_gl *adapter_gl,
         device = wined3d_guess_card(feature_level, gl_renderer_str, &gl_vendor, &vendor);
         TRACE("Guessed device PCI ID 0x%04x.\n", device);
 
+        /* CW HACK 23042: Counter-Strike 2 uses D3D9 to get the driver version, but D3D11 for everything else.
+         * D3DMetal reports the GPU is AMD, and the game expects the D3D9 DriverVersion number to be for an AMD driver.
+         * Apple GPUs end up reporting as an 8800 GTX since they hit fallback paths and Apple OGL only supports FL10_1.
+         * Replace that with a recent AMD GPU so an AMD driver version is returned and the check succeeds.
+         */
+        if (vendor == HW_VENDOR_NVIDIA && device == CARD_NVIDIA_GEFORCE_8800GTX && strstr(gl_vendor_str, "Apple"))
+        {
+            WCHAR name[MAX_PATH], *module_exe;
+            if (GetModuleFileNameW(NULL, name, sizeof(name)))
+            {
+                module_exe = wcsrchr(name, '\\');
+                module_exe = module_exe ? module_exe + 1 : name;
+
+                if (!lstrcmpW(module_exe, L"cs2.exe"))
+                {
+                    vendor = HW_VENDOR_AMD;
+                    device = CARD_AMD_RADEON_RX_480;
+                }
+            }
+        }
+
         if (!(caps_gl_ctx->gpu_description = wined3d_get_gpu_description(vendor, device)))
         {
             ERR("Card %04x:%04x not found in driver DB.\n", vendor, device);
