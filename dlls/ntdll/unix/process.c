@@ -256,7 +256,7 @@ static unsigned int get_pe_file_info( OBJECT_ATTRIBUTES *attr, HANDLE *handle, s
 
     *handle = 0;
     memset( info, 0, sizeof(*info) );
-    if (!(status = nt_to_unix_file_name( attr, &unix_name, FILE_OPEN )))
+    if (!(status = nt_to_unix_file_name( attr, &unix_name, FILE_OPEN, FALSE )))
     {
         status = open_unix_file( handle, unix_name, GENERIC_READ, attr, 0,
                                  FILE_SHARE_READ | FILE_SHARE_DELETE,
@@ -371,7 +371,7 @@ static int get_unix_curdir( const RTL_USER_PROCESS_PARAMETERS *params )
 
     InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
     get_redirect( &attr, &redir );
-    status = nt_to_unix_file_name( &attr, &unix_name, FILE_OPEN );
+    status = nt_to_unix_file_name( &attr, &unix_name, FILE_OPEN, FALSE);
     if (status) goto done;
     status = open_unix_file( &handle, unix_name, FILE_TRAVERSE | SYNCHRONIZE, &attr, 0,
                              FILE_SHARE_READ | FILE_SHARE_DELETE,
@@ -602,7 +602,7 @@ static NTSTATUS fork_and_exec( OBJECT_ATTRIBUTES *attr, int unixdir,
     char *unix_name;
     NTSTATUS status;
 
-    status = nt_to_unix_file_name( attr, &unix_name, FILE_OPEN );
+    status = nt_to_unix_file_name( attr, &unix_name, FILE_OPEN, FALSE );
     if (status) return status;
 
 #ifdef HAVE_PIPE2

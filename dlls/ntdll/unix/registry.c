@@ -1121,7 +1121,7 @@ NTSTATUS WINAPI NtLoadKeyEx( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *f
     if (iostatus) FIXME("iostatus is not filled\n");
 
     get_redirect( &new_attr, &nt_name );
-    if (!(ret = nt_to_unix_file_name( &new_attr, &unix_name, FILE_OPEN )))
+    if (!(ret = nt_to_unix_file_name( &new_attr, &unix_name, FILE_OPEN, FALSE )))
     {
         ret = open_unix_file( &key, unix_name, GENERIC_READ | SYNCHRONIZE,
                               &new_attr, 0, 0, FILE_OPEN, 0, NULL, 0 );

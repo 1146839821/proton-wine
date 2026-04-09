@@ -1070,7 +1070,7 @@ static NTSTATUS load_so_dll( void *args )
     InitializeObjectAttributes( &attr, nt_name, OBJ_CASE_INSENSITIVE, 0, 0 );
     get_redirect( &attr, &redir );
 
-    if (nt_to_unix_file_name( &attr, &unix_name, FILE_OPEN ))
+    if (nt_to_unix_file_name( &attr, &unix_name, FILE_OPEN, FALSE ))
     {
         free( redir.Buffer );
         return STATUS_DLL_NOT_FOUND;
@@ -1768,7 +1768,7 @@ static NTSTATUS open_main_image( WCHAR *image, void **module, SECTION_IMAGE_INFO
 
     init_unicode_string( &nt_name, image );
     InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
-    if (nt_to_unix_file_name( &attr, &unix_name, FILE_OPEN )) return STATUS_DLL_NOT_FOUND;
+    if (nt_to_unix_file_name( &attr, &unix_name, FILE_OPEN, FALSE )) return STATUS_DLL_NOT_FOUND;
 
     status = open_dll_file( unix_name, &attr, &mapping );
     if (!status)

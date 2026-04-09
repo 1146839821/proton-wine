@@ -370,7 +370,7 @@ extern struct async_fileio *alloc_fileio( DWORD size, async_callback_t callback,
 extern void release_fileio( struct async_fileio *io );
 extern NTSTATUS errno_to_status( int err );
 extern BOOL get_redirect( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *redir );
-extern NTSTATUS nt_to_unix_file_name( const OBJECT_ATTRIBUTES *attr, char **name_ret, UINT disposition );
+extern NTSTATUS nt_to_unix_file_name( const OBJECT_ATTRIBUTES *attr, char **name_ret, UINT disposition,  BOOL open_reparse);
 extern NTSTATUS unix_to_nt_file_name( const char *name, WCHAR **nt );
 extern NTSTATUS get_full_path( const WCHAR *name, const WCHAR *curdir, WCHAR **path );
 extern NTSTATUS open_unix_file( HANDLE *handle, const char *unix_name, ACCESS_MASK access,

@@ -164,7 +164,7 @@ static NTSTATUS open_nls_data_file( const char *path, const WCHAR *sysdir, HANDL
                              FILE_OPEN, FILE_SYNCHRONOUS_IO_ALERT, NULL, 0 );
     if (status != STATUS_NO_SUCH_FILE) return status;
 
-    if ((status = nt_to_unix_file_name( &attr, &ntpath, FILE_OPEN ))) return status;
+    if ((status = nt_to_unix_file_name( &attr, &ntpath, FILE_OPEN, FALSE ))) return status;
     status = open_unix_file( file, ntpath, GENERIC_READ, &attr, 0, FILE_SHARE_READ,
                              FILE_OPEN, FILE_SYNCHRONOUS_IO_ALERT, NULL, 0 );
     free( ntpath );
