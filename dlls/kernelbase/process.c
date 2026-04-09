@@ -712,6 +712,19 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         app_name = name;
     }
 
+    /* CW Hack 24920, 24557 */
+    {
+        char sgi[64];
+
+        if (cmd_line && !wcsncmp( cmd_line, L"powershell", 10 )
+            && GetEnvironmentVariableA( "SteamGameId", sgi, sizeof(sgi) ) < sizeof(sgi) && !strcmp( sgi, "2767030" ))
+        {
+            FIXME("HACK: not starting powershell.exe.\n");
+            SetLastError( ERROR_FILE_NOT_FOUND );
+            return FALSE;
+        }
+    }
+
     if (battleye_launcher_redirect_hack( app_name, name, ARRAY_SIZE(name), &orig_app_name ))
         app_name = name;
 
