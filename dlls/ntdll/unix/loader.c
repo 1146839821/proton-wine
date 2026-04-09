@@ -1339,6 +1339,9 @@ static const unixlib_entry_t unix_call_funcs[] =
     steamclient_setup_trampolines,
     is_pc_in_native_so,
     debugstr_pc,
+#if defined(__x86_64__)
+    pe_module_loaded,
+#endif
 };
 
 
