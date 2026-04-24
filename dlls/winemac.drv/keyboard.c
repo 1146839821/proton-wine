@@ -560,6 +560,11 @@ static HKL get_hkl(CFStringRef lang, CFStringRef type)
     ULONG_PTR lcid = get_lcid(lang);
     struct layout *layout;
 
+    /* macOS IME state is tracked separately. Encoding non-layout sources with
+       the 0xe0000000 high bits leaks IME-only HKLs through
+       GetKeyboardLayoutNameW(), which some games parse as a plain KLID. */
+    (void)type;
+
     /* Look for the last occurrence of this lcid in the list and if
        present use that value + 0x10000 */
     LIST_FOR_EACH_ENTRY_REV(layout, &layout_list, struct layout, entry)
@@ -572,8 +577,6 @@ static HKL get_hkl(CFStringRef lang, CFStringRef type)
             break;
         }
     }
-
-    if (!CFEqual(type, kTISTypeKeyboardLayout)) lcid |= 0xe0000000;
 
     return (HKL)lcid;
 }
