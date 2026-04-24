@@ -388,15 +388,29 @@ static void atomic_store_long(volatile LONG *ptr, LONG value)
 #endif
 }
 
+#ifdef __APPLE__
+static int timezone_bias_initialized;
+static timeout_t timezone_bias_cache;
+
+static void init_timezone_bias(void)
+{
+    struct timezone tz;
+
+    if (timezone_bias_initialized) return;
+    if (gettimeofday( NULL, &tz )) return;
+
+    timezone_bias_cache = (timeout_t)tz.tz_minuteswest * 60;
+    timezone_bias_initialized = 1;
+}
+#endif
+
 static int get_timezone_bias( time_t now, timeout_t *bias )
 {
 #ifdef __APPLE__
-    struct timeval tv;
-    struct timezone tz;
-
     (void)now;
-    if (gettimeofday( &tv, &tz )) return 0;
-    *bias = (timeout_t)tz.tz_minuteswest * 60;
+    if (!timezone_bias_initialized) init_timezone_bias();
+    if (!timezone_bias_initialized) return 0;
+    *bias = timezone_bias_cache;
     return 1;
 #else
     struct tm *tm;
@@ -451,6 +465,10 @@ void set_current_time(void)
 {
     static const timeout_t ticks_1601_to_1970 = (timeout_t)86400 * (369 * 365 + 89) * TICKS_PER_SEC;
     struct timeval now;
+#ifdef __APPLE__
+    init_timezone_bias();
+#endif
+
     gettimeofday( &now, NULL );
     current_time = (timeout_t)now.tv_sec * TICKS_PER_SEC + now.tv_usec * 10 + ticks_1601_to_1970;
     monotonic_time = monotonic_counter();
