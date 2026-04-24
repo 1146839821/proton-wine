@@ -1103,6 +1103,24 @@ static void append_envA( WCHAR **env, SIZE_T *pos, SIZE_T *size, const char *nam
     else append_envW( env, pos, size, name, NULL );
 }
 
+static void sync_process_env_overrides( WCHAR **env, SIZE_T *pos, SIZE_T *size )
+{
+    const char *bases = getenv( per_process_env_bases_var );
+    char *copy, *entry, *saveptr;
+
+    if (!bases || !*bases || !(copy = strdup( bases ))) return;
+
+    for (entry = strtok_r( copy, ";", &saveptr ); entry; entry = strtok_r( NULL, ";", &saveptr ))
+    {
+        char *eq = strchr( entry, '=' );
+
+        if (eq) *eq = 0;
+        if (!*entry) continue;
+        append_envA( env, pos, size, entry, getenv( entry ) );
+    }
+    free( copy );
+}
+
 /* set an environment variable for one of the wine path variables */
 static void add_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size, const char *name, const char *path )
 {
@@ -2155,6 +2173,7 @@ void init_startup_info(void)
     memcpy( env, (char *)info + info_size, env_size * sizeof(WCHAR) );
     env_pos = env_size - 1;
     add_dynamic_environment( &env, &env_pos, &env_size );
+    sync_process_env_overrides( &env, &env_pos, &env_size );
     is_prefix_bootstrap = !!find_env_var( env, env_pos, bootstrapW, ARRAY_SIZE(bootstrapW) );
     env[env_pos++] = 0;
 
