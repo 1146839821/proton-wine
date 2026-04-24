@@ -613,6 +613,20 @@ static BOOL should_exec_initial_rosetta_loader( int argc, char *argv[], WORD *ma
     return *machine == IMAGE_FILE_MACHINE_I386;
 }
 
+static void stash_dyld_insert_libraries_for_rosetta_loader(void)
+{
+    const char *existing = getenv( "DYLD_INSERT_LIBRARIES" );
+
+    if (!existing || !existing[0])
+    {
+        unsetenv( "ROSETTA_X87_SAVED_DYLD_INSERT_LIBRARIES" );
+        return;
+    }
+
+    if (!setenv( "ROSETTA_X87_SAVED_DYLD_INSERT_LIBRARIES", existing, 1 ))
+        unsetenv( "DYLD_INSERT_LIBRARIES" );
+}
+
 
 static void preloader_exec( char **argv, WORD machine )
 {
@@ -643,6 +657,7 @@ static void preloader_exec( char **argv, WORD machine )
 #endif
     path = getenv( "ROSETTA_X87_PATH" );
     if (path && machine == IMAGE_FILE_MACHINE_I386) {
+        stash_dyld_insert_libraries_for_rosetta_loader();
         argv[0] = strdup( path );
         execv( argv[0], argv );
     } else
