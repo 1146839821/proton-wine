@@ -189,6 +189,31 @@ will use DXMT while
 will use GPTK.
 .RE
 .TP
+.B WINE_PROCESS_CMDLINE_DIR
+Specifies a directory containing per-process command-line append files.
+Before starting a child Wine process, Wine looks for a file named
+.I <process>.cmd
+matching the executable basename, using a case-insensitive comparison.
+If a matching file exists, its contents are trimmed and appended to the
+child command line as extra arguments.
+An empty
+.I .cmd
+file disables the built-in command-line append hack for that executable.
+.RS
+.PP
+Example:
+.TP
+WINE_PROCESS_CMDLINE_DIR=/opt/wine/process-cmdline
+.br
+If the directory contains
+.I cef.exe.cmd
+with
+.I --disable-gpu --use-angle=vulkan ,
+then
+.I Cef.exe
+will be launched with those arguments appended automatically.
+.RE
+.TP
 .B WINEDLLOVERRIDES
 Defines the override type and load order of dlls used in the loading
 process for any dll. There are currently two types of libraries that can be loaded

@@ -134,6 +134,238 @@ static WCHAR *get_file_name( WCHAR *cmdline, WCHAR *buffer, DWORD buflen )
     return ret;
 }
 
+static WCHAR *heap_strdupW( const WCHAR *str )
+{
+    SIZE_T len = (lstrlenW( str ) + 1) * sizeof(WCHAR);
+    WCHAR *ret = HeapAlloc( GetProcessHeap(), 0, len );
+
+    if (ret) memcpy( ret, str, len );
+    return ret;
+}
+
+static BOOL is_cmdline_space( WCHAR ch )
+{
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+}
+
+static const WCHAR *get_process_basename( const WCHAR *path )
+{
+    const WCHAR *name;
+
+    if (!path) return NULL;
+    name = path;
+    if ((path = wcsrchr( name, '\\' ))) name = path + 1;
+    if ((path = wcsrchr( name, '/' ))) name = path + 1;
+    return name;
+}
+
+static WCHAR *append_command_line( const WCHAR *cmdline, const WCHAR *append )
+{
+    WCHAR *ret;
+
+    if (!(ret = HeapAlloc( GetProcessHeap(), 0,
+                           (lstrlenW( cmdline ) + lstrlenW( append ) + 1) * sizeof(WCHAR) )))
+        return NULL;
+
+    lstrcpyW( ret, cmdline );
+    lstrcatW( ret, append );
+    return ret;
+}
+
+static WCHAR *get_process_cmdline_dir( void )
+{
+    static const WCHAR envW[] = L"WINE_PROCESS_CMDLINE_DIR";
+    static const WCHAR kernel32W[] = L"kernel32.dll";
+    static WCHAR * (CDECL *p_wine_get_dos_file_name)(LPCSTR);
+    WCHAR *dir;
+    char *unix_dir = NULL;
+    WCHAR dummy;
+    DWORD len;
+    int unix_len;
+
+    if (!(len = GetEnvironmentVariableW( envW, &dummy, 0 ))) return NULL;
+    if (!(dir = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return NULL;
+    GetEnvironmentVariableW( envW, dir, len );
+
+    if (wcschr( dir, '/' ) && !wcschr( dir, '\\' ) && !wcschr( dir, ':' ))
+    {
+        if (!p_wine_get_dos_file_name)
+            p_wine_get_dos_file_name = (void *)GetProcAddress( GetModuleHandleW( kernel32W ),
+                                                               "wine_get_dos_file_name" );
+
+        if (p_wine_get_dos_file_name &&
+            (unix_len = WideCharToMultiByte( CP_UNIXCP, 0, dir, -1, NULL, 0, NULL, NULL )))
+        {
+            if ((unix_dir = HeapAlloc( GetProcessHeap(), 0, unix_len )))
+            {
+                WCHAR *dos_dir = NULL;
+
+                WideCharToMultiByte( CP_UNIXCP, 0, dir, -1, unix_dir, unix_len, NULL, NULL );
+                dos_dir = p_wine_get_dos_file_name( unix_dir );
+                HeapFree( GetProcessHeap(), 0, unix_dir );
+
+                if (dos_dir)
+                {
+                    HeapFree( GetProcessHeap(), 0, dir );
+                    dir = dos_dir;
+                }
+            }
+        }
+    }
+
+    return dir;
+}
+
+static WCHAR *find_process_cmdline_file( const WCHAR *dir, const WCHAR *app_name )
+{
+    const WCHAR *base_name;
+    WIN32_FIND_DATAW data;
+    HANDLE find = INVALID_HANDLE_VALUE;
+    WCHAR *wanted = NULL, *pattern = NULL, *path = NULL;
+    DWORD dir_len;
+    BOOL add_slash;
+
+    if (!(base_name = get_process_basename( app_name )) || !base_name[0]) return NULL;
+    if (!(wanted = HeapAlloc( GetProcessHeap(), 0, (lstrlenW( base_name ) + 5) * sizeof(WCHAR) ))) return NULL;
+    swprintf( wanted, lstrlenW( base_name ) + 5, L"%s.cmd", base_name );
+
+    dir_len = lstrlenW( dir );
+    add_slash = dir_len && dir[dir_len - 1] != '\\' && dir[dir_len - 1] != '/';
+    if (!(pattern = HeapAlloc( GetProcessHeap(), 0, (dir_len + add_slash + 2) * sizeof(WCHAR) ))) goto done;
+
+    lstrcpyW( pattern, dir );
+    if (add_slash) lstrcatW( pattern, L"\\" );
+    lstrcatW( pattern, L"*" );
+
+    if ((find = FindFirstFileW( pattern, &data )) == INVALID_HANDLE_VALUE) goto done;
+
+    do
+    {
+        if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !lstrcmpiW( data.cFileName, wanted ))
+        {
+            DWORD path_len = dir_len + add_slash + lstrlenW( data.cFileName ) + 1;
+
+            if ((path = HeapAlloc( GetProcessHeap(), 0, path_len * sizeof(WCHAR) )))
+            {
+                lstrcpyW( path, dir );
+                if (add_slash) lstrcatW( path, L"\\" );
+                lstrcatW( path, data.cFileName );
+            }
+            break;
+        }
+    } while (FindNextFileW( find, &data ));
+
+done:
+    if (find != INVALID_HANDLE_VALUE) FindClose( find );
+    HeapFree( GetProcessHeap(), 0, pattern );
+    HeapFree( GetProcessHeap(), 0, wanted );
+    return path;
+}
+
+static WCHAR *read_process_cmdline_append_file( const WCHAR *path )
+{
+    HANDLE file = INVALID_HANDLE_VALUE;
+    WCHAR *bufferW = NULL, *ret = NULL;
+    char *bufferA = NULL, *data = NULL;
+    DWORD size, read = 0, len;
+    UINT codepage = CP_UTF8;
+
+    if ((file = CreateFileW( path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                             NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL )) == INVALID_HANDLE_VALUE)
+    {
+        WARN( "Failed to open command-line hack file %s, error %lu.\n", debugstr_w(path), GetLastError() );
+        return NULL;
+    }
+
+    size = GetFileSize( file, NULL );
+    if (size == INVALID_FILE_SIZE && GetLastError() != NO_ERROR)
+    {
+        WARN( "Failed to size command-line hack file %s, error %lu.\n", debugstr_w(path), GetLastError() );
+        goto done;
+    }
+
+    if (!(bufferA = HeapAlloc( GetProcessHeap(), 0, size + 1 ))) goto done;
+    if (size && (!ReadFile( file, bufferA, size, &read, NULL ) || read != size))
+    {
+        WARN( "Failed to read command-line hack file %s, error %lu.\n", debugstr_w(path), GetLastError() );
+        goto done;
+    }
+    bufferA[size] = 0;
+    data = bufferA;
+
+    if (size >= 3 && (unsigned char)data[0] == 0xef && (unsigned char)data[1] == 0xbb && (unsigned char)data[2] == 0xbf)
+    {
+        data += 3;
+        size -= 3;
+    }
+    if (!size)
+    {
+        ret = heap_strdupW( L"" );
+        goto done;
+    }
+
+    if (!(len = MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, data, size, NULL, 0 )))
+    {
+        len = MultiByteToWideChar( CP_UNIXCP, 0, data, size, NULL, 0 );
+        codepage = CP_UNIXCP;
+    }
+    if (!len)
+    {
+        WARN( "Failed to decode command-line hack file %s.\n", debugstr_w(path) );
+        goto done;
+    }
+
+    if (!(bufferW = HeapAlloc( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) ))) goto done;
+    MultiByteToWideChar( codepage, codepage == CP_UTF8 ? MB_ERR_INVALID_CHARS : 0, data, size, bufferW, len );
+    bufferW[len] = 0;
+
+    while (len && is_cmdline_space( bufferW[len - 1] )) bufferW[--len] = 0;
+    if (len)
+    {
+        DWORD start = 0;
+
+        while (bufferW[start] && is_cmdline_space( bufferW[start] )) start++;
+        if (bufferW[start])
+        {
+            if ((ret = HeapAlloc( GetProcessHeap(), 0, (len - start + 2) * sizeof(WCHAR) )))
+            {
+                ret[0] = ' ';
+                memcpy( ret + 1, bufferW + start, (len - start + 1) * sizeof(WCHAR) );
+            }
+        }
+        else ret = heap_strdupW( L"" );
+    }
+    else ret = heap_strdupW( L"" );
+
+done:
+    if (file != INVALID_HANDLE_VALUE) CloseHandle( file );
+    HeapFree( GetProcessHeap(), 0, bufferW );
+    HeapFree( GetProcessHeap(), 0, bufferA );
+    return ret;
+}
+
+static WCHAR *load_process_cmdline_append( const WCHAR *app_name, BOOL *found )
+{
+    WCHAR *dir = NULL, *path = NULL, *append = NULL;
+
+    if (found) *found = FALSE;
+    if (!(dir = get_process_cmdline_dir())) return NULL;
+    if (!(path = find_process_cmdline_file( dir, app_name ))) goto done;
+
+    append = read_process_cmdline_append_file( path );
+    if (found) *found = !!append;
+    if (append)
+    {
+        if (append[0]) FIXME( "HACK: appending %s to command line from %s.\n", debugstr_w(append), debugstr_w(path) );
+        else FIXME( "HACK: suppressing built-in command-line append via %s.\n", debugstr_w(path) );
+    }
+
+done:
+    HeapFree( GetProcessHeap(), 0, path );
+    HeapFree( GetProcessHeap(), 0, dir );
+    return append;
+}
+
 
 /***********************************************************************
  *           create_process_params
@@ -580,7 +812,7 @@ static int battleye_launcher_redirect_hack( const WCHAR *app_name, WCHAR *new_na
     return 1;
 }
 
-static const WCHAR *hack_append_command_line( const WCHAR *cmd )
+static const WCHAR *hack_append_command_line_builtin( const WCHAR *cmd )
 {
     static const struct
     {
@@ -642,6 +874,17 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd )
     return NULL;
 }
 
+static WCHAR *hack_append_command_line( const WCHAR *app_name, const WCHAR *builtin_match )
+{
+    const WCHAR *builtin;
+    BOOL found = FALSE;
+    WCHAR *append = load_process_cmdline_append( app_name, &found );
+
+    if (found) return append;
+    if (!(builtin = hack_append_command_line_builtin( builtin_match ))) return NULL;
+    return heap_strdupW( builtin );
+}
+
 /**********************************************************************
  *           CreateProcessInternalW   (kernelbase.@)
  */
@@ -658,7 +901,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     RTL_USER_PROCESS_INFORMATION rtl_info;
     HANDLE parent = 0, debug = 0;
-    const WCHAR *append;
+    WCHAR *append;
     ULONG nt_flags = 0;
     USHORT machine = 0;
     NTSTATUS status;
@@ -676,41 +919,63 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
             if (!(tidy_cmdline = RtlAllocateHeap( GetProcessHeap(), 0, (lstrlenW(app_name)+3) * sizeof(WCHAR) )))
                 return FALSE;
             swprintf( tidy_cmdline, lstrlenW(app_name) + 3, L"\"%s\"", app_name );
+
+            if ((append = load_process_cmdline_append( app_name, NULL )))
+            {
+                WCHAR *cmdline_new;
+
+                if (append[0])
+                {
+                    cmdline_new = append_command_line( tidy_cmdline, append );
+                    HeapFree( GetProcessHeap(), 0, append );
+                    if (!cmdline_new)
+                    {
+                        HeapFree( GetProcessHeap(), 0, tidy_cmdline );
+                        return FALSE;
+                    }
+                    HeapFree( GetProcessHeap(), 0, tidy_cmdline );
+                    tidy_cmdline = cmdline_new;
+                }
+                else HeapFree( GetProcessHeap(), 0, append );
+            }
         }
-        else if ((append = hack_append_command_line( app_name )))
+        else if ((append = hack_append_command_line( app_name, app_name )))
         {
-            tidy_cmdline = RtlAllocateHeap( GetProcessHeap(), 0,
-                                            sizeof(WCHAR) * (lstrlenW(cmd_line) + lstrlenW(append) + 1) );
-            lstrcpyW(tidy_cmdline, cmd_line);
-            lstrcatW(tidy_cmdline, append);
+            if (append[0])
+            {
+                tidy_cmdline = append_command_line( cmd_line, append );
+                HeapFree( GetProcessHeap(), 0, append );
+                if (!tidy_cmdline) return FALSE;
+            }
+            else HeapFree( GetProcessHeap(), 0, append );
         }
     }
     else
     {
-        WCHAR *cmdline_new = NULL;
-
-        if ((append = hack_append_command_line( cmd_line )))
-        {
-            cmdline_new = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(WCHAR)
-                                           * (lstrlenW(cmd_line) + lstrlenW(append) + 1) );
-            lstrcpyW(cmdline_new, cmd_line);
-            lstrcatW(cmdline_new, append);
-        }
-
-        tidy_cmdline = get_file_name( cmdline_new ? cmdline_new : cmd_line, name, ARRAY_SIZE(name) );
+        tidy_cmdline = get_file_name( cmd_line, name, ARRAY_SIZE(name) );
 
         if (!tidy_cmdline)
-        {
-            HeapFree( GetProcessHeap(), 0, cmdline_new );
             return FALSE;
-        }
 
-        if (cmdline_new)
-        {
-            if (cmdline_new == tidy_cmdline) cmd_line = NULL;
-            else HeapFree( GetProcessHeap(), 0, cmdline_new );
-        }
         app_name = name;
+
+        if ((append = hack_append_command_line( app_name, cmd_line )))
+        {
+            if (append[0])
+            {
+                WCHAR *cmdline_new = append_command_line( tidy_cmdline, append );
+
+                HeapFree( GetProcessHeap(), 0, append );
+                if (!cmdline_new)
+                {
+                    if (tidy_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, tidy_cmdline );
+                    return FALSE;
+                }
+                if (tidy_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, tidy_cmdline );
+                tidy_cmdline = cmdline_new;
+            }
+            else HeapFree( GetProcessHeap(), 0, append );
+        }
     }
 
     /* CW Hack 24920, 24557 */

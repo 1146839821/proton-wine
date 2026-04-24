@@ -1140,6 +1140,195 @@ static void test_CommandLine(void)
     NtCurrentTeb()->Peb->ProcessParameters->CommandLine.Buffer = cmdline_backup;
 }
 
+static void test_process_cmdline_dir(void)
+{
+    static const char env_name[] = "WINE_PROCESS_CMDLINE_DIR";
+    static const char append[] = "--cmdline-dir \"extra arg\"";
+    char buffer[4 * MAX_PATH], expected[4 * MAX_PATH], cmd_dir[MAX_PATH], cmd_file[2 * MAX_PATH];
+    char old_dir[2 * MAX_PATH];
+    PROCESS_INFORMATION info;
+    STARTUPINFOA startup;
+    HANDLE file;
+    DWORD old_len = 0, written;
+    BOOL ret, restore_old = FALSE;
+
+    if (strcmp( winetest_platform, "wine" ))
+    {
+        win_skip( "WINE_PROCESS_CMDLINE_DIR is Wine-specific.\n" );
+        return;
+    }
+
+    get_file_name( cmd_dir );
+    ok(DeleteFileA( cmd_dir ), "DeleteFileA(%s) failed: %lu\n", cmd_dir, GetLastError());
+    ok(CreateDirectoryA( cmd_dir, NULL ), "CreateDirectoryA(%s) failed: %lu\n", cmd_dir, GetLastError());
+
+    sprintf( cmd_file, "%s\\%s.cmd", cmd_dir, exename );
+    file = CreateFileA( cmd_file, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileA(%s) failed: %lu\n", cmd_file, GetLastError());
+    if (file == INVALID_HANDLE_VALUE) goto done;
+
+    ret = WriteFile( file, append, sizeof(append) - 1, &written, NULL );
+    ok(ret && written == sizeof(append) - 1, "WriteFile(%s) failed: %lu\n", cmd_file, GetLastError());
+    CloseHandle( file );
+
+    old_len = GetEnvironmentVariableA( env_name, old_dir, sizeof(old_dir) );
+    if (old_len >= sizeof(old_dir))
+    {
+        win_skip( "Original %s is too long to preserve.\n", env_name );
+        goto done;
+    }
+    restore_old = !!old_len;
+
+    ok(SetEnvironmentVariableA( env_name, cmd_dir ), "SetEnvironmentVariableA failed: %lu\n", GetLastError());
+
+    memset( &startup, 0, sizeof(startup) );
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_SHOWNORMAL;
+
+    get_file_name( resfile );
+    sprintf( buffer, "\"%s\" process dump \"%s\"", selfname, resfile );
+    sprintf( expected, "%s %s", buffer, append );
+    ret = CreateProcessA( NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info );
+    ok(ret, "CreateProcessA failed: %lu\n", GetLastError());
+    if (!ret) goto done;
+    wait_and_close_child_process( &info );
+
+    reload_child_info( resfile );
+    okChildInt( "Arguments", "argcA", 6 );
+    okChildString( "Arguments", "argvA4", "--cmdline-dir" );
+    okChildString( "Arguments", "argvA5", "extra arg" );
+    okChildString( "Arguments", "CommandLineA", expected );
+    okChildStringWA( "Arguments", "CommandLineW", expected );
+    release_memory();
+    DeleteFileA( resfile );
+
+done:
+    if (restore_old) SetEnvironmentVariableA( env_name, old_dir );
+    else SetEnvironmentVariableA( env_name, NULL );
+    DeleteFileA( cmd_file );
+    RemoveDirectoryA( cmd_dir );
+}
+
+static void test_process_cmdline_dir_builtin(void)
+{
+    static const char env_name[] = "WINE_PROCESS_CMDLINE_DIR";
+    static const char builtin_exe[] = "steamwebhelper.exe";
+    static const char builtin_append[] = "--no-sandbox --in-process-gpu --disable-gpu --type=crashpad-handler";
+    char buffer[6 * MAX_PATH], expected[6 * MAX_PATH], cmd_dir[MAX_PATH], cmd_file[2 * MAX_PATH];
+    char exe_dir[MAX_PATH], exe_path[2 * MAX_PATH], old_dir[2 * MAX_PATH];
+    PROCESS_INFORMATION info;
+    STARTUPINFOA startup;
+    HANDLE file = INVALID_HANDLE_VALUE;
+    DWORD old_len = 0;
+    BOOL ret, restore_old = FALSE;
+
+    if (strcmp( winetest_platform, "wine" ))
+    {
+        win_skip( "WINE_PROCESS_CMDLINE_DIR is Wine-specific.\n" );
+        return;
+    }
+
+    get_file_name( exe_dir );
+    ok(DeleteFileA( exe_dir ), "DeleteFileA(%s) failed: %lu\n", exe_dir, GetLastError());
+    ok(CreateDirectoryA( exe_dir, NULL ), "CreateDirectoryA(%s) failed: %lu\n", exe_dir, GetLastError());
+    sprintf( exe_path, "%s\\%s", exe_dir, builtin_exe );
+    ok(CopyFileA( selfname, exe_path, FALSE ), "CopyFileA(%s, %s) failed: %lu\n", selfname, exe_path, GetLastError());
+
+    get_file_name( cmd_dir );
+    ok(DeleteFileA( cmd_dir ), "DeleteFileA(%s) failed: %lu\n", cmd_dir, GetLastError());
+    ok(CreateDirectoryA( cmd_dir, NULL ), "CreateDirectoryA(%s) failed: %lu\n", cmd_dir, GetLastError());
+    sprintf( cmd_file, "%s\\STEAMWEBHELPER.EXE.cmd", cmd_dir );
+
+    old_len = GetEnvironmentVariableA( env_name, old_dir, sizeof(old_dir) );
+    if (old_len >= sizeof(old_dir))
+    {
+        win_skip( "Original %s is too long to preserve.\n", env_name );
+        goto done;
+    }
+    restore_old = !!old_len;
+
+    ok(SetEnvironmentVariableA( env_name, cmd_dir ), "SetEnvironmentVariableA failed: %lu\n", GetLastError());
+
+    memset( &startup, 0, sizeof(startup) );
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_SHOWNORMAL;
+
+    get_file_name( resfile );
+    sprintf( buffer, "\"%s\" process dump \"%s\"", exe_path, resfile );
+    sprintf( expected, "%s %s", buffer, builtin_append );
+    ret = CreateProcessA( NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info );
+    ok(ret, "CreateProcessA failed: %lu\n", GetLastError());
+    if (ret)
+    {
+        wait_and_close_child_process( &info );
+        reload_child_info( resfile );
+        okChildInt( "Arguments", "argcA", 8 );
+        okChildString( "Arguments", "argvA4", "--no-sandbox" );
+        okChildString( "Arguments", "argvA5", "--in-process-gpu" );
+        okChildString( "Arguments", "argvA6", "--disable-gpu" );
+        okChildString( "Arguments", "argvA7", "--type=crashpad-handler" );
+        okChildString( "Arguments", "CommandLineA", expected );
+        okChildStringWA( "Arguments", "CommandLineW", expected );
+        release_memory();
+        DeleteFileA( resfile );
+    }
+
+    file = CreateFileA( cmd_file, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileA(%s) failed: %lu\n", cmd_file, GetLastError());
+    if (file != INVALID_HANDLE_VALUE) CloseHandle( file );
+    file = INVALID_HANDLE_VALUE;
+
+    get_file_name( resfile );
+    sprintf( buffer, "\"%s\" process dump \"%s\"", exe_path, resfile );
+    ret = CreateProcessA( NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info );
+    ok(ret, "CreateProcessA failed: %lu\n", GetLastError());
+    if (ret)
+    {
+        wait_and_close_child_process( &info );
+        reload_child_info( resfile );
+        okChildInt( "Arguments", "argcA", 4 );
+        okChildString( "Arguments", "CommandLineA", buffer );
+        okChildStringWA( "Arguments", "CommandLineW", buffer );
+        release_memory();
+        DeleteFileA( resfile );
+    }
+
+    DeleteFileA( cmd_file );
+    file = CreateFileA( cmd_file, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileA(%s) failed: %lu\n", cmd_file, GetLastError());
+
+    get_file_name( resfile );
+    sprintf( buffer, "\"%s\" process dump \"%s\"", exe_path, resfile );
+    sprintf( expected, "%s %s", buffer, builtin_append );
+    ret = CreateProcessA( NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info );
+    ok(ret, "CreateProcessA failed: %lu\n", GetLastError());
+    if (ret)
+    {
+        wait_and_close_child_process( &info );
+        reload_child_info( resfile );
+        okChildInt( "Arguments", "argcA", 8 );
+        okChildString( "Arguments", "argvA4", "--no-sandbox" );
+        okChildString( "Arguments", "argvA5", "--in-process-gpu" );
+        okChildString( "Arguments", "argvA6", "--disable-gpu" );
+        okChildString( "Arguments", "argvA7", "--type=crashpad-handler" );
+        okChildString( "Arguments", "CommandLineA", expected );
+        okChildStringWA( "Arguments", "CommandLineW", expected );
+        release_memory();
+        DeleteFileA( resfile );
+    }
+
+done:
+    if (file != INVALID_HANDLE_VALUE) CloseHandle( file );
+    if (restore_old) SetEnvironmentVariableA( env_name, old_dir );
+    else SetEnvironmentVariableA( env_name, NULL );
+    DeleteFileA( cmd_file );
+    RemoveDirectoryA( cmd_dir );
+    DeleteFileA( exe_path );
+    RemoveDirectoryA( exe_dir );
+}
+
 static void test_Directory(void)
 {
     char                buffer[2 * MAX_PATH + 25];
@@ -5663,6 +5852,8 @@ START_TEST(process)
     test_TerminateProcess();
     test_Startup();
     test_CommandLine();
+    test_process_cmdline_dir();
+    test_process_cmdline_dir_builtin();
     test_Directory();
     test_Toolhelp();
     test_Environment();
