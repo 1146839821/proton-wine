@@ -2064,6 +2064,8 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     is_prefix_bootstrap = !!bootstrap;
     free( bootstrap );
     add_registry_environment( &env, &env_pos, &env_size );
+    /* Keep the initial process environment aligned with per-process Unix overrides. */
+    sync_process_env_overrides( &env, &env_pos, &env_size );
     env[env_pos++] = 0;
 
     status = load_main_exe( NULL, main_argv[1], curdir, 0, &image, module );

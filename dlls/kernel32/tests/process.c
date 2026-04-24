@@ -328,6 +328,36 @@ static BOOL nt_to_win32_path( const WCHAR *nt_path, WCHAR *path, DWORD size )
     return TRUE;
 }
 
+static const char *get_basename_a( const char *path )
+{
+    const char *ret = path, *p;
+
+    for (p = path; *p; ++p)
+        if (*p == '\\' || *p == '/') ret = p + 1;
+    return ret;
+}
+
+static BOOL dos_to_unix_path_a( const char *dos_path, char *unix_path, DWORD size )
+{
+    WCHAR dos_pathW[4 * MAX_PATH];
+    char *tmp;
+    size_t len;
+
+    if (!MultiByteToWideChar( CP_ACP, 0, dos_path, -1, dos_pathW, ARRAY_SIZE(dos_pathW) )) return FALSE;
+    if (!(tmp = wine_get_unix_file_name( dos_pathW ))) return FALSE;
+
+    len = strlen( tmp );
+    if (len + 1 > size)
+    {
+        HeapFree( GetProcessHeap(), 0, tmp );
+        return FALSE;
+    }
+
+    memcpy( unix_path, tmp, len + 1 );
+    HeapFree( GetProcessHeap(), 0, tmp );
+    return TRUE;
+}
+
 static BOOL get_builtin_source_dll( WCHAR *source, DWORD count )
 {
     static const WCHAR formatW[] = L"WINEDLLDIR%u";
@@ -654,6 +684,28 @@ static void     doChild(const char* file, const char* option)
         childPrintf(hFile, "[ExitCode]\nvalue=%d\n\n", 123);
         CloseHandle(hFile);
         ExitProcess(123);
+    }
+    if (option && !strncmp(option, "loadlib:", 8))
+    {
+        char env_path[8 * MAX_PATH] = {0}, module_path[8 * MAX_PATH] = {0};
+        DWORD env_len;
+        HMODULE module;
+
+        env_len = GetEnvironmentVariableA( "WINEDLLPATH", env_path, ARRAY_SIZE(env_path) );
+        if (env_len >= ARRAY_SIZE(env_path)) env_path[0] = 0;
+
+        SetLastError( 0xdeadbeef );
+        module = LoadLibraryA( option + 8 );
+
+        childPrintf( hFile, "[LoadLibrary]\nLoaded=%u\nLastError=%lu\nWINEDLLPATHA=%s\n",
+                     !!module, GetLastError(), encodeA(env_path) );
+
+        if (module)
+        {
+            GetModuleFileNameA( module, module_path, ARRAY_SIZE(module_path) );
+            FreeLibrary( module );
+        }
+        childPrintf( hFile, "ModulePathA=%s\n\n", encodeA(module_path) );
     }
 
     CloseHandle(hFile);
@@ -1507,6 +1559,154 @@ done:
     DeleteFileW( target_dll );
     RemoveDirectoryW( pe_dir_path );
     RemoveDirectoryW( temp_dir );
+}
+
+static void test_process_env_dir_winedllpath_builtin(void)
+{
+    static const char env_dir_var[] = "WINE_PROCESS_ENV_DIR";
+    static const char dll_name[] = "winedllpath_test.dll";
+#ifdef _WIN64
+    static const char pe_dir[] = "x86_64-windows";
+#else
+    static const char pe_dir[] = "i386-windows";
+#endif
+    char buffer[8 * MAX_PATH], overlay_dir[MAX_PATH] = {0}, overlay_unix[4 * MAX_PATH] = {0};
+    char overlay_pe_dir[2 * MAX_PATH] = {0}, target_dll[4 * MAX_PATH] = {0};
+    char common_dir[MAX_PATH] = {0}, common_unix[4 * MAX_PATH] = {0};
+    char env_dir[MAX_PATH] = {0}, env_dir_unix[4 * MAX_PATH] = {0}, env_file[2 * MAX_PATH] = {0};
+    char self_unix[4 * MAX_PATH] = {0}, source_dll[4 * MAX_PATH];
+    WCHAR source_dllW[4 * MAX_PATH];
+    HANDLE file = INVALID_HANDLE_VALUE;
+    DWORD written;
+    BOOL ret;
+
+    if (strcmp( winetest_platform, "wine" ))
+    {
+        win_skip( "WINE_PROCESS_ENV_DIR is Wine-specific.\n" );
+        return;
+    }
+
+    if (!get_builtin_source_dll( source_dllW, ARRAY_SIZE(source_dllW) ))
+    {
+        win_skip( "No builtin PE source found in WINEDLLDIR.\n" );
+        return;
+    }
+
+    if (!WideCharToMultiByte( CP_ACP, 0, source_dllW, -1, source_dll, ARRAY_SIZE(source_dll), NULL, NULL ))
+    {
+        win_skip( "Failed to convert builtin source path.\n" );
+        return;
+    }
+
+    if (!dos_to_unix_path_a( selfname, self_unix, ARRAY_SIZE(self_unix) ))
+    {
+        win_skip( "Failed to convert self path to Unix path.\n" );
+        return;
+    }
+
+    get_file_name( overlay_dir );
+    ok( DeleteFileA( overlay_dir ), "DeleteFileA(%s) failed: %lu\n", overlay_dir, GetLastError() );
+    ret = CreateDirectoryA( overlay_dir, NULL );
+    ok( ret, "CreateDirectoryA(%s) failed: %lu\n", overlay_dir, GetLastError() );
+    if (!ret) goto done;
+
+    sprintf( overlay_pe_dir, "%s\\%s", overlay_dir, pe_dir );
+    ret = CreateDirectoryA( overlay_pe_dir, NULL );
+    ok( ret, "CreateDirectoryA(%s) failed: %lu\n", overlay_pe_dir, GetLastError() );
+    if (!ret) goto done;
+
+    sprintf( target_dll, "%s\\%s", overlay_pe_dir, dll_name );
+    ret = CopyFileA( source_dll, target_dll, FALSE );
+    ok( ret, "CopyFileA(%s, %s) failed: %lu\n", source_dll, target_dll, GetLastError() );
+    if (!ret) goto done;
+
+    get_file_name( common_dir );
+    ok( DeleteFileA( common_dir ), "DeleteFileA(%s) failed: %lu\n", common_dir, GetLastError() );
+    ret = CreateDirectoryA( common_dir, NULL );
+    ok( ret, "CreateDirectoryA(%s) failed: %lu\n", common_dir, GetLastError() );
+    if (!ret) goto done;
+
+    get_file_name( env_dir );
+    ok( DeleteFileA( env_dir ), "DeleteFileA(%s) failed: %lu\n", env_dir, GetLastError() );
+    ret = CreateDirectoryA( env_dir, NULL );
+    ok( ret, "CreateDirectoryA(%s) failed: %lu\n", env_dir, GetLastError() );
+    if (!ret) goto done;
+
+    ok( dos_to_unix_path_a( overlay_dir, overlay_unix, ARRAY_SIZE(overlay_unix) ),
+        "Failed to convert overlay path %s to Unix path.\n", overlay_dir );
+    ok( dos_to_unix_path_a( common_dir, common_unix, ARRAY_SIZE(common_unix) ),
+        "Failed to convert common path %s to Unix path.\n", common_dir );
+    ok( dos_to_unix_path_a( env_dir, env_dir_unix, ARRAY_SIZE(env_dir_unix) ),
+        "Failed to convert env dir path %s to Unix path.\n", env_dir );
+    if (!overlay_unix[0] || !common_unix[0] || !env_dir_unix[0]) goto done;
+
+    sprintf( env_file, "%s\\%s.env", env_dir, get_basename_a( selfname ) );
+    file = CreateFileA( env_file, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
+    ok( file != INVALID_HANDLE_VALUE, "CreateFileA(%s) failed: %lu\n", env_file, GetLastError() );
+    if (file == INVALID_HANDLE_VALUE) goto done;
+
+    sprintf( buffer, "WINEDLLPATH=%s\n", overlay_unix );
+    ret = WriteFile( file, buffer, strlen(buffer), &written, NULL );
+    ok( ret && written == strlen(buffer), "WriteFile(%s) failed: %lu\n", env_file, GetLastError() );
+    CloseHandle( file );
+    file = INVALID_HANDLE_VALUE;
+
+    get_file_name( resfile );
+    sprintf( buffer, "loadlib:%s", dll_name );
+
+    {
+        char loader_path[5 * MAX_PATH];
+        char env_dir_assignment[5 * MAX_PATH];
+        char winedllpath_assignment[5 * MAX_PATH];
+        char *argv[] =
+        {
+            "/usr/bin/env",
+            env_dir_assignment,
+            winedllpath_assignment,
+            loader_path,
+            self_unix,
+            "process",
+            "dump",
+            resfile,
+            buffer,
+            NULL
+        };
+        DWORD len = GetEnvironmentVariableA( "WINELOADER", loader_path, ARRAY_SIZE(loader_path) );
+
+        if (!len || len >= ARRAY_SIZE(loader_path))
+        {
+            win_skip( "WINELOADER is unavailable.\n" );
+            goto done;
+        }
+        sprintf( argv[1], "%s=%s", env_dir_var, env_dir_unix );
+        sprintf( argv[2], "WINEDLLPATH=%s", common_unix );
+
+        ret = !__wine_unix_spawnvp( argv, TRUE );
+    }
+    ok( ret, "Failed to spawn top-level Wine process.\n" );
+    if (!ret) goto done;
+
+    reload_child_info( resfile );
+    okChildString( "LoadLibrary", "WINEDLLPATHA", overlay_unix );
+    okChildInt( "LoadLibrary", "Loaded", 1 );
+
+    {
+        char *module_path = getChildString( "LoadLibrary", "ModulePathA" );
+        ok( module_path && strstr( module_path, dll_name ) != NULL,
+            "Unexpected module path %s.\n", module_path ? module_path : "(null)" );
+        release_memory();
+    }
+    DeleteFileA( resfile );
+
+done:
+    DeleteFileA( resfile );
+    if (file != INVALID_HANDLE_VALUE) CloseHandle( file );
+    DeleteFileA( env_file );
+    RemoveDirectoryA( env_dir );
+    DeleteFileA( target_dll );
+    RemoveDirectoryA( overlay_pe_dir );
+    RemoveDirectoryA( overlay_dir );
+    RemoveDirectoryA( common_dir );
 }
 
 static void test_Directory(void)
@@ -6035,6 +6235,7 @@ START_TEST(process)
     test_process_cmdline_dir();
     test_process_cmdline_dir_builtin();
     test_winedlldir_builtin_without_prefix();
+    test_process_env_dir_winedllpath_builtin();
     test_Directory();
     test_Toolhelp();
     test_Environment();
