@@ -575,9 +575,48 @@ char *get_alternate_wineloader( WORD machine )
     return remove_tail( wineloader, "64" );
 }
 
-
-static void preloader_exec( char **argv )
+/* On no-preloader paths, direct "wine /unix/path/app.exe" launches never reach preloader_exec().
+ * Peek at the target PE header so i386 main processes can still be re-exec'd through runtime_loader.
+ */
+static BOOL get_initial_unix_pe_machine( const char *unix_name, WORD *machine )
 {
+    IMAGE_DOS_HEADER dos;
+    struct
+    {
+        DWORD signature;
+        IMAGE_FILE_HEADER file;
+    } nt;
+    int fd;
+
+    *machine = IMAGE_FILE_MACHINE_UNKNOWN;
+    if (!unix_name || (fd = open( unix_name, O_RDONLY )) == -1) return FALSE;
+
+    if (pread( fd, &dos, sizeof(dos), 0 ) != sizeof(dos) ||
+        dos.e_magic != IMAGE_DOS_SIGNATURE ||
+        dos.e_lfanew <= 0 ||
+        pread( fd, &nt, sizeof(nt), dos.e_lfanew ) != sizeof(nt) ||
+        nt.signature != IMAGE_NT_SIGNATURE)
+    {
+        close( fd );
+        return FALSE;
+    }
+
+    close( fd );
+    *machine = nt.file.Machine;
+    return TRUE;
+}
+
+static BOOL should_exec_initial_rosetta_loader( int argc, char *argv[], WORD *machine )
+{
+    if (!getenv( "ROSETTA_X87_PATH" ) || argc <= 1 || !argv[1]) return FALSE;
+    if (!get_initial_unix_pe_machine( argv[1], machine )) return FALSE;
+    return *machine == IMAGE_FILE_MACHINE_I386;
+}
+
+
+static void preloader_exec( char **argv, WORD machine )
+{
+    char *path;
 #ifdef HAVE_WINE_PRELOADER
     static const char *preloader = "wine-preloader";
     char *p;
@@ -602,16 +641,20 @@ static void preloader_exec( char **argv )
     execv( argv[0], argv );
     free( argv[0] );
 #endif
-    execv( argv[1], argv + 1 );
+    path = getenv( "ROSETTA_X87_PATH" );
+    if (path && machine == IMAGE_FILE_MACHINE_I386) {
+        argv[0] = strdup( path );
+        execv( argv[0], argv );
+    } else
+        execv( argv[1], argv + 1 );
 }
 
 /* exec the appropriate wine loader for the specified machine */
 static NTSTATUS loader_exec( char **argv, WORD machine )
 {
-    if (((argv[1] = get_alternate_wineloader( machine )))) preloader_exec( argv );
 
     argv[1] = strdup( wineloader );
-    preloader_exec( argv );
+    preloader_exec( argv, machine );
     return STATUS_INVALID_IMAGE_FORMAT;
 }
 
@@ -2690,6 +2733,7 @@ static void check_command_line( int argc, char *argv[] )
  */
 DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
 {
+    WORD exec_machine = current_machine;
     main_argc = argc;
     main_argv = argv;
 
@@ -2698,14 +2742,14 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
     if (!getenv( "WINELOADERNOEXEC" ))  /* first time around */
     {
         check_command_line( argc, argv );
-        if (pre_exec())
+        if (pre_exec() || should_exec_initial_rosetta_loader( argc, argv, &exec_machine ))
         {
             static char noexec[] = "WINELOADERNOEXEC=1";
             char **new_argv = malloc( (argc + 2) * sizeof(*argv) );
 
             memcpy( new_argv + 1, argv, (argc + 1) * sizeof(*argv) );
             putenv( noexec );
-            loader_exec( new_argv, current_machine );
+            loader_exec( new_argv, exec_machine );
             fatal_error( "could not exec the wine loader\n" );
         }
     }
