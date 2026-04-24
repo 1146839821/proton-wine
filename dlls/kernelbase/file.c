@@ -109,6 +109,52 @@ static inline BOOL contains_path( const WCHAR *name )
 }
 
 
+static BOOL matches_p5s_movie_path( const WCHAR *filename, const WCHAR *pattern )
+{
+    const unsigned int pattern_len = lstrlenW( pattern );
+    const WCHAR *match = filename;
+
+    while ((match = StrStrIW( match, pattern )))
+    {
+        const WCHAR *suffix = match + pattern_len;
+
+        if (*suffix < '0' || *suffix > '9')
+        {
+            match++;
+            continue;
+        }
+
+        while (*suffix >= '0' && *suffix <= '9') suffix++;
+        if (!wcsnicmp( suffix, L".bin", 4 )) return TRUE;
+
+        match++;
+    }
+
+    return FALSE;
+}
+
+
+static BOOL should_fail_p5s_movie_open( const WCHAR *filename )
+{
+    static LONG enabled = -1;
+    LONG current = enabled;
+    char game_id[16];
+
+    if (current == -1)
+    {
+        DWORD len = GetEnvironmentVariableA( "SteamGameId", game_id, ARRAY_SIZE( game_id ) );
+        current = len && len < ARRAY_SIZE( game_id ) && !lstrcmpA( game_id, "1382330" );
+        InterlockedCompareExchange( &enabled, current, -1 );
+        current = enabled;
+    }
+
+    if (!current) return FALSE;
+
+    return matches_p5s_movie_path( filename, L"data/pd/movie" ) ||
+           matches_p5s_movie_path( filename, L"data\\pd\\movie" );
+}
+
+
 /***********************************************************************
  *      add_boot_rename_entry
  *
@@ -805,6 +851,13 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileW( LPCWSTR filename, DWORD access, DWO
     if (!filename || !filename[0])
     {
         SetLastError( ERROR_PATH_NOT_FOUND );
+        return INVALID_HANDLE_VALUE;
+    }
+
+    if (should_fail_p5s_movie_open( filename ))
+    {
+        TRACE( "failing open for P5S movie file %s\n", debugstr_w( filename ) );
+        SetLastError( ERROR_FILE_NOT_FOUND );
         return INVALID_HANDLE_VALUE;
     }
 
