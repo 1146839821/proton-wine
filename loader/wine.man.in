@@ -152,6 +152,43 @@ addition to any directory specified in
 .BR WINEDLLPATH ,
 Wine will also look in the installation directory.
 .TP
+.B WINE_PROCESS_ENV_DIR
+Specifies a directory containing per-process environment files. Before
+starting a child Wine process, Wine looks for a file named
+.I <process>.env
+matching the executable basename, using a case-insensitive comparison.
+Each non-empty line in the file should be in
+.I NAME=VALUE
+format. Lines starting with "#" are ignored. Lines starting with
+.I unset
+remove a variable from the child process environment.
+Each new Wine process starts from the common Unix environment first,
+then applies the matching per-process file if one exists. A process
+without a matching
+.I .env
+file therefore uses the common environment instead of inheriting a
+previous process-specific override.
+.RS
+.PP
+Example:
+.TP
+WINE_PROCESS_ENV_DIR=/opt/wine/process-env
+.br
+If the directory contains
+.I cef.exe.env
+with
+.I WINEDLLPATH=/opt/dxmt/lib
+and
+.I gta5.exe.env
+with
+.I WINEDLLPATH=/opt/gptk/lib ,
+then
+.I Cef.exe
+will use DXMT while
+.I gta5.exe
+will use GPTK.
+.RE
+.TP
 .B WINEDLLOVERRIDES
 Defines the override type and load order of dlls used in the loading
 process for any dll. There are currently two types of libraries that can be loaded

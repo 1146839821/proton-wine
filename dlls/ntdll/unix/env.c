@@ -30,6 +30,8 @@
 #include <locale.h>
 #include <langinfo.h>
 #include <fcntl.h>
+#include <string.h>
+#include <strings.h>
 #include <stdarg.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
@@ -332,6 +334,9 @@ static inline SIZE_T get_env_length( const WCHAR *env )
 
 #define STARTS_WITH(var,str) (!strncmp( var, str, sizeof(str) - 1 ))
 
+static const char per_process_env_dir_var[] = "WINE_PROCESS_ENV_DIR";
+static const char per_process_env_bases_var[] = "WINE_PROCESS_ENV_BASES";
+
 /***********************************************************************
  *           is_special_env_var
  *
@@ -367,7 +372,45 @@ static BOOL is_dynamic_env_var( const char *var )
             STARTS_WITH( var, "WINEUSERNAME=" ) ||
             STARTS_WITH( var, "WINEPRELOADRESERVE=" ) ||
             STARTS_WITH( var, "WINELOADERNOEXEC=" ) ||
+            STARTS_WITH( var, "WINE_PROCESS_ENV_DIR=" ) ||
+            STARTS_WITH( var, "WINE_PROCESS_ENV_BASES=" ) ||
             STARTS_WITH( var, "WINESERVERSOCKET=" ));
+}
+
+static BOOL is_process_env_override_var( const char *var )
+{
+    const char *bases = getenv( per_process_env_bases_var );
+    size_t name_len = strcspn( var, "=" );
+
+    if (!bases || !*bases) return FALSE;
+
+    while (*bases)
+    {
+        const char *next = strchr( bases, ';' );
+        size_t key_len = strcspn( bases, "=;" );
+
+        if (key_len == name_len && !strncasecmp( bases, var, name_len )) return TRUE;
+        if (!next) break;
+        bases = next + 1;
+    }
+    return FALSE;
+}
+
+static void append_process_env_bases( WCHAR *env, WCHAR **ptr, WCHAR *end )
+{
+    const char *bases = getenv( per_process_env_bases_var );
+    char *copy, *entry, *saveptr;
+
+    if (!bases || !*bases || !(copy = strdup( bases ))) return;
+
+    for (entry = strtok_r( copy, ";", &saveptr ); entry; entry = strtok_r( NULL, ";", &saveptr ))
+    {
+        char *eq = strchr( entry, '=' );
+
+        if (!eq) continue;
+        *ptr += ntdll_umbstowcs( entry, strlen( entry ) + 1, *ptr, end - *ptr );
+    }
+    free( copy );
 }
 
 /******************************************************************
@@ -949,12 +992,14 @@ static const char overrides_help_message[] =
  */
 static WCHAR *get_initial_environment( SIZE_T *pos, SIZE_T *size )
 {
+    const char *bases = getenv( per_process_env_bases_var );
     char **e;
     WCHAR *env, *ptr, *end;
 
     /* estimate needed size */
     *size = 1;
     for (e = environ; *e; e++) *size += strlen(*e) + 1;
+    if (bases) *size += strlen( bases ) + 1;
 
     env = malloc( *size * sizeof(WCHAR) );
     ptr = env;
@@ -976,8 +1021,10 @@ static WCHAR *get_initial_environment( SIZE_T *pos, SIZE_T *size )
         else if (is_special_env_var( str )) continue;  /* skip it */
 
         if (is_dynamic_env_var( str )) continue;
+        if (is_process_env_override_var( str )) continue;
         ptr += ntdll_umbstowcs( str, strlen(str) + 1, ptr, end - ptr );
     }
+    append_process_env_bases( env, &ptr, end );
     *pos = ptr - env;
     return env;
 }

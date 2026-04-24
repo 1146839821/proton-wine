@@ -20,11 +20,14 @@
 
 #include "config.h"
 
+#include <ctype.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -36,6 +39,9 @@
 #endif
 
 #include "main.h"
+
+static const char per_process_env_dir_var[] = "WINE_PROCESS_ENV_DIR";
+static const char per_process_env_bases_var[] = "WINE_PROCESS_ENV_BASES";
 
 #if defined(__APPLE__) && defined(__x86_64__) && !defined(HAVE_WINE_PRELOADER)
 
@@ -122,6 +128,225 @@ static char *build_path( const char *dir, const char *name )
     if (len && ret[len - 1] != '/') ret[len++] = '/';
     strcpy( ret + len, name );
     return ret;
+}
+
+static char *dup_trimmed_string( const char *str, size_t len )
+{
+    char *ret;
+
+    while (len && isspace( (unsigned char)*str ))
+    {
+        str++;
+        len--;
+    }
+    while (len && isspace( (unsigned char)str[len - 1] )) len--;
+
+    if (!(ret = malloc( len + 1 ))) return NULL;
+    memcpy( ret, str, len );
+    ret[len] = 0;
+    return ret;
+}
+
+static int process_env_bases_contains( const char *bases, const char *name )
+{
+    size_t name_len = strlen( name );
+
+    if (!bases || !*bases) return 0;
+
+    while (*bases)
+    {
+        const char *next = strchr( bases, ';' );
+        size_t key_len = strcspn( bases, "=;" );
+
+        if (key_len == name_len && !strncasecmp( bases, name, name_len )) return 1;
+        if (!next) break;
+        bases = next + 1;
+    }
+    return 0;
+}
+
+static char *append_process_env_base( char *bases, const char *name )
+{
+    const char *value = getenv( name );
+    size_t bases_len = bases ? strlen( bases ) : 0;
+    size_t name_len = strlen( name );
+    size_t value_len = value ? strlen( value ) + 1 : 0;
+    char *ret;
+
+    if (!(ret = realloc( bases, bases_len + (bases_len ? 1 : 0) + name_len + value_len + 1 )))
+    {
+        free( bases );
+        return NULL;
+    }
+
+    if (bases_len) ret[bases_len++] = ';';
+    memcpy( ret + bases_len, name, name_len );
+    bases_len += name_len;
+    if (value)
+    {
+        ret[bases_len++] = '=';
+        memcpy( ret + bases_len, value, value_len - 1 );
+        bases_len += value_len - 1;
+    }
+    ret[bases_len] = 0;
+    return ret;
+}
+
+static int record_process_env_base( char **bases, const char *name )
+{
+    if (!*bases)
+    {
+        const char *current = getenv( per_process_env_bases_var );
+        if (current && !(*bases = strdup( current ))) return 0;
+    }
+    if (process_env_bases_contains( *bases, name )) return 1;
+    return (*bases = append_process_env_base( *bases, name )) != NULL;
+}
+
+static void restore_process_env_bases(void)
+{
+    const char *bases = getenv( per_process_env_bases_var );
+    char *copy, *entry, *saveptr;
+
+    if (!bases || !*bases || !(copy = strdup( bases ))) return;
+
+    for (entry = strtok_r( copy, ";", &saveptr ); entry; entry = strtok_r( NULL, ";", &saveptr ))
+    {
+        char *eq = strchr( entry, '=' );
+
+        if (eq)
+        {
+            *eq = 0;
+            setenv( entry, eq + 1, 1 );
+        }
+        else unsetenv( entry );
+    }
+    free( copy );
+}
+
+static void trim_line_end( char *str )
+{
+    size_t len = strlen( str );
+
+    while (len && (str[len - 1] == '\n' || str[len - 1] == '\r')) str[--len] = 0;
+}
+
+static const char *get_basename( const char *path )
+{
+    const char *base = path, *p;
+
+    for (p = path; *p; p++)
+        if (*p == '/' || *p == '\\') base = p + 1;
+    return base;
+}
+
+static char *find_process_env_file( const char *image )
+{
+    const char *dir = getenv( per_process_env_dir_var );
+    const char *base;
+    char *env_name, *ret = NULL;
+    size_t len;
+
+    if (!dir || !*dir || !image || !*image) return NULL;
+
+    base = get_basename( image );
+    len = strlen( base );
+    if (!(env_name = malloc( len + sizeof(".env") ))) return NULL;
+    memcpy( env_name, base, len );
+    memcpy( env_name + len, ".env", sizeof(".env") );
+
+    if ((ret = build_path( dir, env_name )) && !access( ret, R_OK ))
+    {
+        free( env_name );
+        return ret;
+    }
+
+    free( ret );
+    ret = NULL;
+
+    {
+        DIR *handle;
+        struct dirent *entry;
+
+        if ((handle = opendir( dir )))
+        {
+            while ((entry = readdir( handle )))
+            {
+                if (!strcasecmp( entry->d_name, env_name ))
+                {
+                    ret = build_path( dir, entry->d_name );
+                    break;
+                }
+            }
+            closedir( handle );
+        }
+    }
+
+    free( env_name );
+    return ret;
+}
+
+static void apply_process_env_file( const char *image )
+{
+    char *bases = NULL, *path, *line = NULL;
+    size_t capacity = 0;
+    FILE *file;
+
+    if (!(path = find_process_env_file( image ))) return;
+    if (!(file = fopen( path, "r" )))
+    {
+        free( path );
+        return;
+    }
+
+    while (getline( &line, &capacity, file ) != -1)
+    {
+        char *entry = line;
+        char *eq, *name;
+
+        trim_line_end( entry );
+        while (*entry && isspace( (unsigned char)*entry )) entry++;
+        if (!*entry || *entry == '#') continue;
+
+        if (!strncasecmp( entry, "unset ", 6 ))
+        {
+            if ((name = dup_trimmed_string( entry + 6, strlen( entry + 6 ) )))
+            {
+                if (*name && !record_process_env_base( &bases, name ))
+                {
+                    free( name );
+                    break;
+                }
+                if (*name) unsetenv( name );
+                free( name );
+            }
+            continue;
+        }
+
+        if (!strncasecmp( entry, "export ", 7 )) entry += 7;
+        if (!(eq = strchr( entry, '=' ))) continue;
+
+        if (!(name = dup_trimmed_string( entry, eq - entry ))) break;
+        if (*name)
+        {
+            char *value = eq + 1;
+
+            if (!record_process_env_base( &bases, name ))
+            {
+                free( name );
+                break;
+            }
+            while (*value && isspace( (unsigned char)*value )) value++;
+            setenv( name, value, 1 );
+        }
+        free( name );
+    }
+
+    if (bases && *bases) setenv( per_process_env_bases_var, bases, 1 );
+    free( line );
+    free( bases );
+    fclose( file );
+    free( path );
 }
 
 /* build a path with the relative dir from 'from' to 'dest' appended to base */
@@ -256,6 +481,8 @@ int main( int argc, char *argv[] )
     void *handle;
 
     init_reserved_areas();
+    restore_process_env_bases();
+    if (argc > 1) apply_process_env_file( argv[1] );
 
     if ((handle = load_ntdll( argv[0] )))
     {

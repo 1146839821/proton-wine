@@ -25,6 +25,8 @@
 
 #include "config.h"
 
+#include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -32,6 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -77,6 +80,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(process);
 static ULONG execute_flags = MEM_EXECUTE_OPTION_DISABLE;
 
 static UINT process_error_mode;
+static const char per_process_env_dir_var[] = "WINE_PROCESS_ENV_DIR";
+static const char per_process_env_bases_var[] = "WINE_PROCESS_ENV_BASES";
 
 static char **build_argv( const UNICODE_STRING *cmdline, int reserved )
 {
@@ -142,6 +147,264 @@ static char **build_argv( const UNICODE_STRING *cmdline, int reserved )
     argv[argc++] = arg;
     argv[argc] = NULL;
     return argv;
+}
+
+static char *dup_trimmed_string( const char *str, size_t len )
+{
+    char *ret;
+
+    while (len && isspace( (unsigned char)*str ))
+    {
+        str++;
+        len--;
+    }
+    while (len && isspace( (unsigned char)str[len - 1] )) len--;
+
+    if (!(ret = malloc( len + 1 ))) return NULL;
+    memcpy( ret, str, len );
+    ret[len] = 0;
+    return ret;
+}
+
+static BOOL process_env_bases_contains( const char *bases, const char *name )
+{
+    size_t name_len = strlen( name );
+
+    if (!bases || !*bases) return FALSE;
+
+    while (*bases)
+    {
+        const char *next = strchr( bases, ';' );
+        size_t key_len = strcspn( bases, "=;" );
+
+        if (key_len == name_len && !strncasecmp( bases, name, name_len )) return TRUE;
+        if (!next) break;
+        bases = next + 1;
+    }
+    return FALSE;
+}
+
+static char *append_process_env_base( char *bases, const char *name )
+{
+    const char *value = getenv( name );
+    size_t bases_len = bases ? strlen( bases ) : 0;
+    size_t name_len = strlen( name );
+    size_t value_len = value ? strlen( value ) + 1 : 0;
+    char *ret;
+
+    if (!(ret = realloc( bases, bases_len + (bases_len ? 1 : 0) + name_len + value_len + 1 )))
+    {
+        free( bases );
+        return NULL;
+    }
+
+    if (bases_len) ret[bases_len++] = ';';
+    memcpy( ret + bases_len, name, name_len );
+    bases_len += name_len;
+    if (value)
+    {
+        ret[bases_len++] = '=';
+        memcpy( ret + bases_len, value, value_len - 1 );
+        bases_len += value_len - 1;
+    }
+    ret[bases_len] = 0;
+    return ret;
+}
+
+static BOOL record_process_env_base( char **bases, const char *name )
+{
+    if (!*bases)
+    {
+        const char *current = getenv( per_process_env_bases_var );
+        if (current && !(*bases = strdup( current ))) return FALSE;
+    }
+    if (process_env_bases_contains( *bases, name )) return TRUE;
+    return (*bases = append_process_env_base( *bases, name )) != NULL;
+}
+
+static void trim_line_end( char *str )
+{
+    size_t len = strlen( str );
+
+    while (len && (str[len - 1] == '\n' || str[len - 1] == '\r')) str[--len] = 0;
+}
+
+static char *build_path_string( const char *dir, const char *name )
+{
+    size_t dir_len = strlen( dir );
+    size_t name_len = strlen( name );
+    size_t sep_len = dir_len && dir[dir_len - 1] != '/';
+    char *ret;
+
+    if (!(ret = malloc( dir_len + sep_len + name_len + 1 ))) return NULL;
+    memcpy( ret, dir, dir_len );
+    if (sep_len) ret[dir_len++] = '/';
+    memcpy( ret + dir_len, name, name_len );
+    ret[dir_len + name_len] = 0;
+    return ret;
+}
+
+static char *unicode_to_utf8_string( const WCHAR *str, size_t len )
+{
+    char *ret;
+    int bytes;
+
+    if (!(ret = malloc( len * 3 + 1 ))) return NULL;
+    bytes = ntdll_wcstoumbs( str, len, ret, len * 3, FALSE );
+    ret[bytes] = 0;
+    return ret;
+}
+
+static char *get_process_image_name( const UNICODE_STRING *image )
+{
+    const WCHAR *name, *ptr;
+    size_t len;
+
+    if (!image->Buffer) return NULL;
+
+    name = image->Buffer;
+    len = image->Length / sizeof(WCHAR);
+
+    for (ptr = name + len; ptr > name; --ptr)
+    {
+        if (ptr[-1] == '\\' || ptr[-1] == '/')
+        {
+            name = ptr;
+            len -= ptr - image->Buffer;
+            break;
+        }
+    }
+
+    return unicode_to_utf8_string( name, len );
+}
+
+static char *find_process_env_file( const UNICODE_STRING *image )
+{
+    const char *dir = getenv( per_process_env_dir_var );
+    char *env_name = NULL, *image_name = NULL, *ret = NULL;
+    DIR *handle = NULL;
+    struct dirent *entry;
+    size_t len;
+
+    if (!dir || !*dir) return NULL;
+    if (!(image_name = get_process_image_name( image ))) goto done;
+    len = strlen( image_name );
+    if (!(env_name = malloc( len + sizeof(".env") ))) goto done;
+    memcpy( env_name, image_name, len );
+    memcpy( env_name + len, ".env", sizeof(".env") );
+
+    if ((ret = build_path_string( dir, env_name )) && !access( ret, R_OK )) goto done;
+    free( ret );
+    ret = NULL;
+
+    if (!(handle = opendir( dir ))) goto done;
+    while ((entry = readdir( handle )))
+    {
+        if (!strcasecmp( entry->d_name, env_name ))
+        {
+            ret = build_path_string( dir, entry->d_name );
+            break;
+        }
+    }
+
+done:
+    if (handle) closedir( handle );
+    free( env_name );
+    free( image_name );
+    return ret;
+}
+
+static void restore_process_env_bases(void)
+{
+    const char *bases = getenv( per_process_env_bases_var );
+    char *copy, *entry, *saveptr;
+
+    if (!bases || !*bases || !(copy = strdup( bases ))) return;
+
+    for (entry = strtok_r( copy, ";", &saveptr ); entry; entry = strtok_r( NULL, ";", &saveptr ))
+    {
+        char *eq = strchr( entry, '=' );
+
+        if (eq)
+        {
+            *eq = 0;
+            setenv( entry, eq + 1, 1 );
+        }
+        else unsetenv( entry );
+    }
+    free( copy );
+}
+
+static void apply_process_env_file( const RTL_USER_PROCESS_PARAMETERS *params )
+{
+    char *bases = NULL, *path, *line = NULL;
+    size_t capacity = 0;
+    ssize_t len;
+    FILE *file;
+
+    if (!(path = find_process_env_file( &params->ImagePathName ))) return;
+    if (!(file = fopen( path, "r" )))
+    {
+        WARN( "Failed to open process env file %s for %s: %s\n", path,
+              debugstr_us( &params->ImagePathName ), strerror( errno ) );
+        free( path );
+        return;
+    }
+
+    TRACE( "Applying process env file %s for %s\n", path, debugstr_us( &params->ImagePathName ) );
+
+    while ((len = getline( &line, &capacity, file )) != -1)
+    {
+        char *entry = line;
+        char *eq, *name;
+
+        trim_line_end( entry );
+        while (*entry && isspace( (unsigned char)*entry )) entry++;
+        if (!*entry || *entry == '#') continue;
+
+        if (!strncasecmp( entry, "unset ", 6 ))
+        {
+            if ((name = dup_trimmed_string( entry + 6, strlen( entry + 6 ) )))
+            {
+                if (*name && !record_process_env_base( &bases, name ))
+                {
+                    free( name );
+                    break;
+                }
+                if (*name) unsetenv( name );
+                free( name );
+            }
+            continue;
+        }
+
+        if (!strncasecmp( entry, "export ", 7 )) entry += 7;
+        if (!(eq = strchr( entry, '=' )))
+        {
+            WARN( "Ignoring malformed entry \"%s\" in %s\n", entry, path );
+            continue;
+        }
+
+        if (!(name = dup_trimmed_string( entry, eq - entry ))) break;
+        if (*name)
+        {
+            char *value = eq + 1;
+
+            if (!record_process_env_base( &bases, name ))
+            {
+                free( name );
+                break;
+            }
+            while (*value && isspace( (unsigned char)*value )) value++;
+            setenv( name, value, 1 );
+        }
+        free( name );
+    }
+
+    if (bases && *bases) setenv( per_process_env_bases_var, bases, 1 );
+    free( line );
+    free( bases );
+    fclose( file );
+    free( path );
 }
 
 
@@ -460,6 +723,8 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
                 close( unixdir );
             }
             argv = build_argv( &params->CommandLine, 2 );
+            restore_process_env_bases();
+            apply_process_env_file( params );
 
         /* CW Hack 24560: Don't advertise Vulkan extensions for Path of Exile 2 */
 #ifdef __APPLE__
