@@ -88,6 +88,15 @@ support kernel threads may be supported in the future.
   MacOSX10.10.sdk and mingw-w64 v8.  The MacOSX10.14.sdk and later can
   only build wine64.
 
+**Rosetta x87 JIT support on macOS**:
+  `ROSETTA_X87_PATH` only takes effect when it points to a working
+  rosettax87_jit loader.  Build or install the loader from
+  https://github.com/Lifeisawful/rosettax87_jit, then set
+  `ROSETTA_X87_PATH` to that loader binary before starting Wine.  When
+  Wine detects an initial i386 PE executable through the no-preloader
+  launch path, it re-execs through the configured loader so Rosetta can
+  use the x87 JIT path.
+
 **Supported file systems**:
   Wine should run on most file systems. A few compatibility problems
   have also been reported using files accessed through Samba. Also,
