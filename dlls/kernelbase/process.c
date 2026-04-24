@@ -620,6 +620,8 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd )
         {L"steamwebhelper.exe", L" --no-sandbox --single-process --disable-gpu"},
         {L"SlayTheSpire2.exe", L" --rendering-driver opengl3"},
         {L"EADesktop.exe", L" --in-process-gpu --use-gl=angle"},
+        {L"SocialClubHelper.exe", L" --no-sandbox --in-process-gpu --disable-gpu"},
+        {L"PlayGTAV.exe", L" -nobattleye"},
     };
     unsigned int i;
     char sgi[64];
