@@ -97,6 +97,7 @@ static void   (WINAPI *pDeleteProcThreadAttributeList)(struct _PROC_THREAD_ATTRI
 static DWORD  (WINAPI *pGetActiveProcessorCount)(WORD);
 static DWORD  (WINAPI *pGetMaximumProcessorCount)(WORD);
 static BOOL   (WINAPI *pGetProcessInformation)(HANDLE,PROCESS_INFORMATION_CLASS,void*,DWORD);
+static BOOLEAN (WINAPI *pRtlDosPathNameToNtPathName_U)(const WCHAR*, UNICODE_STRING*, WCHAR**, CURDIR*);
 
 /* ############################### */
 static char     base[MAX_PATH];
@@ -284,6 +285,7 @@ static BOOL init(void)
     pGetActiveProcessorCount = (void *)GetProcAddress(hkernel32, "GetActiveProcessorCount");
     pGetMaximumProcessorCount = (void *)GetProcAddress(hkernel32, "GetMaximumProcessorCount");
     pGetProcessInformation = (void *)GetProcAddress(hkernel32, "GetProcessInformation");
+    pRtlDosPathNameToNtPathName_U = (void *)GetProcAddress(hntdll, "RtlDosPathNameToNtPathName_U");
 
     return TRUE;
 }
@@ -301,6 +303,87 @@ static void     get_file_name(char* buf)
     buf[0] = '\0';
     GetTempPathA(sizeof(path), path);
     GetTempFileNameA(path, "wt", 0, buf);
+}
+
+static void get_file_name_w(WCHAR *buf)
+{
+    WCHAR path[MAX_PATH];
+
+    buf[0] = 0;
+    GetTempPathW( ARRAY_SIZE(path), path );
+    GetTempFileNameW( path, L"wt", 0, buf );
+}
+
+static BOOL nt_to_win32_path( const WCHAR *nt_path, WCHAR *path, DWORD size )
+{
+    if (!wcsncmp( nt_path, L"\\??\\", 4 ))
+    {
+        if (lstrlenW( nt_path + 4 ) + 1 > size) return FALSE;
+        lstrcpyW( path, nt_path + 4 );
+        return TRUE;
+    }
+
+    if (lstrlenW( nt_path ) + 1 > size) return FALSE;
+    lstrcpyW( path, nt_path );
+    return TRUE;
+}
+
+static BOOL get_builtin_source_dll( WCHAR *source, DWORD count )
+{
+    static const WCHAR formatW[] = L"WINEDLLDIR%u";
+    static const WCHAR *preferred_dlls[] =
+    {
+        L"version.dll",
+        L"winmm.dll",
+        L"winhttp.dll",
+        L"setupapi.dll",
+        L"dnsapi.dll",
+    };
+#ifdef _WIN64
+    static const WCHAR pe_dirW[] = L"x86_64-windows";
+#else
+    static const WCHAR pe_dirW[] = L"i386-windows";
+#endif
+    WCHAR env_name[32], nt_root[4 * MAX_PATH], root[4 * MAX_PATH], pattern[4 * MAX_PATH];
+    WIN32_FIND_DATAW data;
+    HANDLE find;
+    DWORD i, j, len;
+
+    for (i = 0; ; ++i)
+    {
+        swprintf( env_name, ARRAY_SIZE(env_name), formatW, i );
+        len = GetEnvironmentVariableW( env_name, nt_root, ARRAY_SIZE(nt_root) );
+        if (!len) break;
+        if (len >= ARRAY_SIZE(nt_root)) continue;
+        if (!nt_to_win32_path( nt_root, root, ARRAY_SIZE(root) )) continue;
+
+        for (j = 0; j < ARRAY_SIZE(preferred_dlls); ++j)
+        {
+            swprintf( pattern, ARRAY_SIZE(pattern), L"%s\\%s\\%s", root, pe_dirW, preferred_dlls[j] );
+            if (GetFileAttributesW( pattern ) != INVALID_FILE_ATTRIBUTES)
+            {
+                lstrcpynW( source, pattern, count );
+                return TRUE;
+            }
+        }
+
+        swprintf( pattern, ARRAY_SIZE(pattern), L"%s\\%s\\*.dll", root, pe_dirW );
+        if ((find = FindFirstFileW( pattern, &data )) == INVALID_HANDLE_VALUE) continue;
+
+        do
+        {
+            if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+            {
+                swprintf( source, count, L"%s\\%s\\%s", root, pe_dirW, data.cFileName );
+                FindClose( find );
+                return TRUE;
+            }
+        } while (FindNextFileW( find, &data ));
+
+        FindClose( find );
+    }
+
+    return FALSE;
 }
 
 /******************************************************************
@@ -1327,6 +1410,103 @@ done:
     RemoveDirectoryA( cmd_dir );
     DeleteFileA( exe_path );
     RemoveDirectoryA( exe_dir );
+}
+
+static void test_winedlldir_builtin_without_prefix(void)
+{
+    static const char dll_nameA[] = "winedllpath_test.dll";
+    static const WCHAR dll_nameW[] = L"winedllpath_test.dll";
+#ifdef _WIN64
+    static const WCHAR pe_dirW[] = L"x86_64-windows";
+#else
+    static const WCHAR pe_dirW[] = L"i386-windows";
+#endif
+    WCHAR temp_dir[4 * MAX_PATH] = {0}, pe_dir_path[4 * MAX_PATH] = {0}, source_dll[4 * MAX_PATH] = {0};
+    WCHAR target_dll[4 * MAX_PATH] = {0}, nt_temp_dir[4 * MAX_PATH] = {0}, old_dlldir0[4 * MAX_PATH] = {0};
+    WCHAR module_path[4 * MAX_PATH] = {0};
+    UNICODE_STRING nt_name = {0};
+    HMODULE module;
+    DWORD old_len = 0;
+    BOOL restore_old = FALSE;
+    BOOL ret;
+
+    if (strcmp( winetest_platform, "wine" ))
+    {
+        win_skip( "WINEDLLDIR fallback is Wine-specific.\n" );
+        return;
+    }
+
+    if (!pRtlDosPathNameToNtPathName_U)
+    {
+        win_skip( "RtlDosPathNameToNtPathName_U is unavailable.\n" );
+        return;
+    }
+
+    if (!get_builtin_source_dll( source_dll, ARRAY_SIZE(source_dll) ))
+    {
+        win_skip( "No builtin PE source found in WINEDLLDIR.\n" );
+        return;
+    }
+
+    get_file_name_w( temp_dir );
+    ok( DeleteFileW( temp_dir ), "DeleteFileW failed: %lu\n", GetLastError() );
+    ret = CreateDirectoryW( temp_dir, NULL );
+    ok( ret, "CreateDirectoryW failed: %lu\n", GetLastError() );
+    if (!ret) goto done;
+
+    swprintf( pe_dir_path, ARRAY_SIZE(pe_dir_path), L"%s\\%s", temp_dir, pe_dirW );
+    ret = CreateDirectoryW( pe_dir_path, NULL );
+    ok( ret, "CreateDirectoryW failed: %lu\n", GetLastError() );
+    if (!ret) goto done;
+
+    swprintf( target_dll, ARRAY_SIZE(target_dll), L"%s\\%s", pe_dir_path, dll_nameW );
+    ret = CopyFileW( source_dll, target_dll, FALSE );
+    ok( ret, "CopyFileW(%s, %s) failed: %lu\n",
+        wine_dbgstr_w(source_dll), wine_dbgstr_w(target_dll), GetLastError() );
+    if (!ret) goto done;
+
+    old_len = GetEnvironmentVariableW( L"WINEDLLDIR0", old_dlldir0, ARRAY_SIZE(old_dlldir0) );
+    if (old_len >= ARRAY_SIZE(old_dlldir0))
+    {
+        win_skip( "Original WINEDLLDIR0 is too long to preserve.\n" );
+        goto done;
+    }
+    restore_old = !!old_len;
+
+    ok( pRtlDosPathNameToNtPathName_U( temp_dir, &nt_name, NULL, NULL ),
+        "RtlDosPathNameToNtPathName_U failed.\n" );
+    if (!nt_name.Buffer) goto done;
+    if (nt_name.Length / sizeof(WCHAR) >= ARRAY_SIZE(nt_temp_dir))
+    {
+        win_skip( "WINEDLLDIR0 NT path is too long to preserve.\n" );
+        RtlFreeUnicodeString( &nt_name );
+        goto done;
+    }
+    lstrcpynW( nt_temp_dir, nt_name.Buffer, ARRAY_SIZE(nt_temp_dir) );
+    RtlFreeUnicodeString( &nt_name );
+
+    ret = SetEnvironmentVariableW( L"WINEDLLDIR0", nt_temp_dir );
+    ok( ret, "SetEnvironmentVariableW failed: %lu\n", GetLastError() );
+    if (!ret) goto done;
+
+    SetLastError( 0xdeadbeef );
+    module = LoadLibraryA( dll_nameA );
+    ok( module != NULL, "LoadLibraryA failed: %lu\n", GetLastError() );
+    if (module)
+    {
+        DWORD len = GetModuleFileNameW( module, module_path, ARRAY_SIZE(module_path) );
+
+        ok( len != 0, "GetModuleFileNameW failed: %lu\n", GetLastError() );
+        if (len) ok( wcsstr( module_path, dll_nameW ) != NULL, "Unexpected module path %s.\n", wine_dbgstr_w(module_path) );
+        FreeLibrary( module );
+    }
+
+done:
+    if (restore_old) SetEnvironmentVariableW( L"WINEDLLDIR0", old_dlldir0 );
+    else SetEnvironmentVariableW( L"WINEDLLDIR0", NULL );
+    DeleteFileW( target_dll );
+    RemoveDirectoryW( pe_dir_path );
+    RemoveDirectoryW( temp_dir );
 }
 
 static void test_Directory(void)
@@ -5854,6 +6034,7 @@ START_TEST(process)
     test_CommandLine();
     test_process_cmdline_dir();
     test_process_cmdline_dir_builtin();
+    test_winedlldir_builtin_without_prefix();
     test_Directory();
     test_Toolhelp();
     test_Environment();

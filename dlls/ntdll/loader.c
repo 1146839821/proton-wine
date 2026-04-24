@@ -3681,8 +3681,8 @@ static NTSTATUS get_env_var( const WCHAR *name, SIZE_T extra, UNICODE_STRING *re
 /***********************************************************************
  *	find_builtin_without_file
  *
- * Find a builtin dll when the corresponding file cannot be found in the prefix.
- * This is used during prefix bootstrap.
+ * Find a builtin dll when the corresponding file cannot be found in the prefix,
+ * or when a WINEDLLDIRn overlay provides an additional builtin PE file.
  */
 static NTSTATUS find_builtin_without_file( const WCHAR *name, UNICODE_STRING *new_name,
                                            WINE_MODREF **pwm, HANDLE *mapping,
@@ -3696,33 +3696,32 @@ static NTSTATUS find_builtin_without_file( const WCHAR *name, UNICODE_STRING *ne
 
     if (contains_path( name )) return status;
 
-    if (!is_prefix_bootstrap)
+    /* Keep build-dir fallback limited to prefix bootstrap and legacy 16-bit loads,
+     * but always allow WINEDLLDIRn overlays to provide additional builtin PE files. */
+    if (is_prefix_bootstrap || (!name[1] || !wcscmp( name + wcslen(name) - 2, L"16" )))
     {
-        /* 16-bit files can't be loaded from the prefix */
-        if (!name[1] || wcscmp( name + wcslen(name) - 2, L"16" )) return status;
-    }
+        if (!get_env_var( L"WINEBUILDDIR", 20 + 2 * wcslen(name) + wcslen(pe_dir), new_name ))
+        {
+            len = new_name->Length;
+            RtlAppendUnicodeToString( new_name, L"\\dlls\\" );
+            RtlAppendUnicodeToString( new_name, name );
+            if ((ext = wcsrchr( name, '.' )) && !wcscmp( ext, L".dll" )) new_name->Length -= 4 * sizeof(WCHAR);
+            RtlAppendUnicodeToString( new_name, pe_dir );
+            RtlAppendUnicodeToString( new_name, L"\\" );
+            RtlAppendUnicodeToString( new_name, name );
+            status = open_dll_file( new_name, pwm, mapping, image_info, id );
+            if (status != STATUS_DLL_NOT_FOUND) goto done;
 
-    if (!get_env_var( L"WINEBUILDDIR", 20 + 2 * wcslen(name) + wcslen(pe_dir), new_name ))
-    {
-        len = new_name->Length;
-        RtlAppendUnicodeToString( new_name, L"\\dlls\\" );
-        RtlAppendUnicodeToString( new_name, name );
-        if ((ext = wcsrchr( name, '.' )) && !wcscmp( ext, L".dll" )) new_name->Length -= 4 * sizeof(WCHAR);
-        RtlAppendUnicodeToString( new_name, pe_dir );
-        RtlAppendUnicodeToString( new_name, L"\\" );
-        RtlAppendUnicodeToString( new_name, name );
-        status = open_dll_file( new_name, pwm, mapping, image_info, id );
-        if (status != STATUS_DLL_NOT_FOUND) goto done;
-
-        new_name->Length = len;
-        RtlAppendUnicodeToString( new_name, L"\\programs\\" );
-        RtlAppendUnicodeToString( new_name, name );
-        RtlAppendUnicodeToString( new_name, pe_dir );
-        RtlAppendUnicodeToString( new_name, L"\\" );
-        RtlAppendUnicodeToString( new_name, name );
-        status = open_dll_file( new_name, pwm, mapping, image_info, id );
-        if (status != STATUS_DLL_NOT_FOUND) goto done;
-        RtlFreeUnicodeString( new_name );
+            new_name->Length = len;
+            RtlAppendUnicodeToString( new_name, L"\\programs\\" );
+            RtlAppendUnicodeToString( new_name, name );
+            RtlAppendUnicodeToString( new_name, pe_dir );
+            RtlAppendUnicodeToString( new_name, L"\\" );
+            RtlAppendUnicodeToString( new_name, name );
+            status = open_dll_file( new_name, pwm, mapping, image_info, id );
+            if (status != STATUS_DLL_NOT_FOUND) goto done;
+            RtlFreeUnicodeString( new_name );
+        }
     }
 
     for (i = 0; ; i++)
