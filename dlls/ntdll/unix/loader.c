@@ -1942,6 +1942,32 @@ NTSTATUS load_start_exe( WCHAR **image, void **module )
     return status;
 }
 
+/***********************************************************************
+ *           load_steam_exe
+ *
+ * Load steam.exe as main image.
+ * Adapted from load_start_exe.
+ */
+NTSTATUS load_steam_exe( UNICODE_STRING *nt_name, void **module )
+{
+    static const WCHAR startW[] = {'s','t','e','a','m','.','e','x','e',0};
+    unsigned int status;
+    SIZE_T size;
+    WCHAR *image = malloc( sizeof("\\??\\C:\\windows\\system32\\steam.exe") * sizeof(WCHAR) );
+
+    wcscpy( image, get_machine_wow64_dir( current_machine ));
+    wcscat( image, startW );
+    init_unicode_string( nt_name, image );
+    status = find_builtin_dll( nt_name, NULL, module, &size, &main_image_info, 0, 0, current_machine, 0, FALSE, 0 );
+    if (!NT_SUCCESS(status))
+    {
+        MESSAGE( "wine: failed to load steam.exe: %x\n", status );
+        NtTerminateProcess( GetCurrentProcess(), status );
+    }
+    MESSAGE("wine: launching from steam.exe stub!\n");
+    return status;
+}
+
 
 /***********************************************************************
  *           load_ntdll_functions
@@ -2244,6 +2270,18 @@ static ULONG_PTR get_image_address(void)
     return 0;
 }
 
+static void hacks_init(void)
+{
+    if (main_argc > 1 && 
+        (strstr(main_argv[1], "GenshinImpact.exe") || 
+         strstr(main_argv[1], "YuanShen.exe") || 
+         strstr(main_argv[1], "fpsunlock.exe") || 
+         strstr(main_argv[1], "ZenlessZoneZero.exe")))
+    {
+        setenv("WINE_ENABLE_STEAM_STUB", "1", 0);
+    }
+}
+
 BOOL ac_odyssey;
 BOOL fsync_simulate_sched_quantum;
 BOOL alert_simulate_sched_quantum;
@@ -2438,6 +2476,7 @@ static void start_main_thread(void)
     signal_alloc_thread( teb );
     dbg_init();
     startup_info_size = server_init_process();
+    hacks_init();
     msync_init();
     hacks_init();
     fsync_init();

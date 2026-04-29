@@ -1993,7 +1993,7 @@ NTSTATUS WINAPI NtQuerySystemTime( LARGE_INTEGER *time )
             clock_id = CLOCK_REALTIME;
     }
 
-    if (!clock_gettime( clock_id, &ts ))
+    if (!clock_gettime( CLOCK_REALTIME, &ts ))
     {
         time->QuadPart = ticks_from_time_t( ts.tv_sec ) + (ts.tv_nsec + 50) / 100;
     }

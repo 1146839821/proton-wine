@@ -237,6 +237,13 @@ static inline BOOL ignore_error( Display *display, XErrorEvent *event )
         }
 #endif
     }
+#ifdef HAVE_X11_EXTENSIONS_XINPUT_H
+    if (event->request_code == 131 /* XInputExtension */ &&
+        event->minor_code   == 3   /* X_OpenDevice */)
+    {
+        return TRUE;
+    }
++#endif
     return FALSE;
 }
 

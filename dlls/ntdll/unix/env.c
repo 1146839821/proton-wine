@@ -2030,6 +2030,23 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module )
     }
 }
 
+/* HACK: Check for conditions to use the Steam stub */
+static BOOL use_steam_stub()
+{
+    static volatile char cache = -1;
+    if (cache == -1)
+    {
+        const char *env = getenv("WINE_ENABLE_STEAM_STUB");
+        
+        if (env && atoi(env))
+            cache = TRUE;
+        else
+            cache = FALSE;
+    }
+
+    return cache;
+}
+
 
 /*************************************************************************
  *		build_initial_params
@@ -2046,6 +2063,7 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     WCHAR *env = get_initial_environment( &env_pos, &env_size );
     WCHAR *curdir = get_initial_directory();
     NTSTATUS status;
+    BOOL launch_with_steam = use_steam_stub();
 
     /* store the initial PATH value */
     path = get_env_var( env, env_pos, pathW, 4 );
@@ -2082,15 +2100,31 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
         }
     }
 
-    if (status)  /* try launching it through start.exe */
+    /* check if we should launch from the Steam stub */
+    /* launch using the steam wrapper */
+    if (launch_with_steam)
     {
-        static const char *args[] = { "start.exe", "/exec" };
+        static const char *args[] = { "steam.exe" };
         free( image );
         if (*module) NtUnmapViewOfSection( GetCurrentProcess(), *module );
-        load_start_exe( &image, module );
-        prepend_argv( args, 2 );
+        load_steam_exe( &nt_name, module );
+        prepend_argv( args, 1 );
     }
-    else rebuild_argv();
+    /* or fallback to upstream behavior */
+    else {
+        if (status)  /* try launching it through start.exe */
+        {
+            static const char *args[] = { "start.exe", "/exec" };
+            free( nt_name.Buffer );
+            if (*module) NtUnmapViewOfSection( GetCurrentProcess(), *module );
+            load_start_exe( &nt_name, module );
+            prepend_argv( args, 2 );
+        }
+        else
+        {
+            rebuild_argv();
+            if (NtCurrentTeb64()) NtCurrentTeb64()->TlsSlots[WOW64_TLS_FILESYSREDIR] = FALSE;
+        }
 
     main_wargv = build_wargv( get_dos_path( image ));
     cmdline = build_command_line( main_wargv );
