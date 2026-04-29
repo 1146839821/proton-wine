@@ -2476,7 +2476,6 @@ static void start_main_thread(void)
     signal_alloc_thread( teb );
     dbg_init();
     startup_info_size = server_init_process();
-    hacks_init();
     msync_init();
     hacks_init();
     fsync_init();
