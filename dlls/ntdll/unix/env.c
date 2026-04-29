@@ -2030,6 +2030,7 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module )
     }
 }
 
+
 /* HACK: Check for conditions to use the Steam stub */
 static BOOL use_steam_stub()
 {
@@ -2062,9 +2063,9 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     WCHAR *dst, *image, *cmdline, *path, *bootstrap;
     WCHAR *env = get_initial_environment( &env_pos, &env_size );
     WCHAR *curdir = get_initial_directory();
+    UNICODE_STRING nt_name;
     NTSTATUS status;
     BOOL launch_with_steam = use_steam_stub();
-
     /* store the initial PATH value */
     path = get_env_var( env, env_pos, pathW, 4 );
     add_dynamic_environment( &env, &env_pos, &env_size );
@@ -2090,7 +2091,6 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     if (!status)
     {
         char *loader;
-
         if (main_image_info.ImageCharacteristics & IMAGE_FILE_DLL) status = STATUS_INVALID_IMAGE_FORMAT;
         /* if we have to use a different loader, fall back to start.exe */
         if ((loader = get_alternate_wineloader( main_image_info.Machine )))
@@ -2100,15 +2100,19 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
         }
     }
 
+
     /* check if we should launch from the Steam stub */
     /* launch using the steam wrapper */
     if (launch_with_steam)
     {
+
         static const char *args[] = { "steam.exe" };
-        free( image );
+        free( nt_name.Buffer );
         if (*module) NtUnmapViewOfSection( GetCurrentProcess(), *module );
         load_steam_exe( &nt_name, module );
         prepend_argv( args, 1 );
+        
+        
     }
     /* or fallback to upstream behavior */
     else {
