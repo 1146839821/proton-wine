@@ -2029,8 +2029,6 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module )
         wow_peb->SessionId                       = peb->SessionId;
     }
 }
-
-
 /* HACK: Check for conditions to use the Steam stub */
 static BOOL use_steam_stub()
 {
@@ -2048,7 +2046,6 @@ static BOOL use_steam_stub()
     return cache;
 }
 
-
 /*************************************************************************
  *		build_initial_params
  *
@@ -2063,8 +2060,8 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     WCHAR *dst, *image, *cmdline, *path, *bootstrap;
     WCHAR *env = get_initial_environment( &env_pos, &env_size );
     WCHAR *curdir = get_initial_directory();
-    UNICODE_STRING nt_name;
     NTSTATUS status;
+    UNICODE_STRING nt_name;
     BOOL launch_with_steam = use_steam_stub();
     /* store the initial PATH value */
     path = get_env_var( env, env_pos, pathW, 4 );
@@ -2091,6 +2088,7 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     if (!status)
     {
         char *loader;
+
         if (main_image_info.ImageCharacteristics & IMAGE_FILE_DLL) status = STATUS_INVALID_IMAGE_FORMAT;
         /* if we have to use a different loader, fall back to start.exe */
         if ((loader = get_alternate_wineloader( main_image_info.Machine )))
@@ -2100,23 +2098,15 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
         }
     }
 
-
-    /* check if we should launch from the Steam stub */
-    /* launch using the steam wrapper */
     if (launch_with_steam)
     {
-
         static const char *args[] = { "steam.exe" };
-        free( nt_name.Buffer );
+        free( image );
         if (*module) NtUnmapViewOfSection( GetCurrentProcess(), *module );
         load_steam_exe( &nt_name, module );
         prepend_argv( args, 1 );
-        
-        
     }
-    /* or fallback to upstream behavior */
-    else {
-        if (status)  /* try launching it through start.exe */
+    else  if (status)  /* try launching it through start.exe */
         {
             static const char *args[] = { "start.exe", "/exec" };
             free( nt_name.Buffer );
@@ -2129,6 +2119,7 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
             rebuild_argv();
             if (NtCurrentTeb64()) NtCurrentTeb64()->TlsSlots[WOW64_TLS_FILESYSREDIR] = FALSE;
         }
+
 
     main_wargv = build_wargv( get_dos_path( image ));
     cmdline = build_command_line( main_wargv );
