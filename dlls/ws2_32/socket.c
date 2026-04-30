@@ -1221,9 +1221,9 @@ static BOOL is_mhy(void)
         
         /* Check for known games */ 
         if ((p = wcsrchr(name, '/')))
-            name = p  1;
+            name = p + 1;
         if ((p = wcsrchr(name, '\\')))
-            name = p  1;
+            name = p + 1;
         ret = (!wcsicmp(name, L"StarRail.exe"));
         cache = ret;
 
