@@ -2270,17 +2270,6 @@ static ULONG_PTR get_image_address(void)
     return 0;
 }
 
-static void hacks_init(void)
-{
-    if (main_argc > 1 && 
-        (strstr(main_argv[1], "GenshinImpact.exe") || 
-         strstr(main_argv[1], "YuanShen.exe") || 
-         strstr(main_argv[1], "fpsunlock.exe") || 
-         strstr(main_argv[1], "ZenlessZoneZero.exe")))
-    {
-        setenv("WINE_ENABLE_STEAM_STUB", "1", 0);
-    }
-}
 
 BOOL ac_odyssey;
 BOOL fsync_simulate_sched_quantum;
@@ -2294,6 +2283,15 @@ long long ram_reporting_bias;
 
 static void hacks_init(void)
 {
+    if (main_argc > 1 && 
+        (strstr(main_argv[1], "GenshinImpact.exe") || 
+         strstr(main_argv[1], "YuanShen.exe") || 
+         strstr(main_argv[1], "fpsunlock.exe") || 
+         strstr(main_argv[1], "ZenlessZoneZero.exe")))
+    {
+        setenv("WINE_ENABLE_STEAM_STUB", "1", 0);
+    }
+
     const char *sgi = getenv( "SteamGameId" );
     const char *env_str;
     if ((env_str = getenv("WINE_RAM_REPORTING_BIAS")))
