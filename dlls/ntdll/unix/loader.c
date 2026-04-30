@@ -2283,14 +2283,6 @@ long long ram_reporting_bias;
 
 static void hacks_init(void)
 {
-    if (main_argc > 1 && 
-        (strstr(main_argv[1], "GenshinImpact.exe") || 
-         strstr(main_argv[1], "YuanShen.exe") || 
-         strstr(main_argv[1], "fpsunlock.exe") || 
-         strstr(main_argv[1], "ZenlessZoneZero.exe")))
-    {
-        setenv("WINE_ENABLE_STEAM_STUB", "1", 0);
-    }
 
     const char *sgi = getenv( "SteamGameId" );
     const char *env_str;
@@ -2303,7 +2295,15 @@ static void hacks_init(void)
     env_str = getenv("WINE_SIMULATE_ASYNC_READ");
     if (env_str)
         ac_odyssey = !!atoi(env_str);
-    else if (main_argc > 1 && (strstr(main_argv[1], "ACOdyssey.exe") || strstr(main_argv[1], "ImmortalsFenyxRising.exe")))
+    else if (main_argc > 1 && (strstr(main_argv[1], "ACOdyssey.exe") || 
+                               strstr(main_argv[1], "ImmortalsFenyxRising.exe")
+                               strstr(main_argv[1], "GenshinImpact.exe") || 
+                               strstr(main_argv[1], "YuanShen.exe") || 
+                               strstr(main_argv[1], "ZenlessZoneZero.exe") ||
+                               strstr(main_argv[1], "fpsunlock.exe")))
+    {
+        setenv("WINE_ENABLE_STEAM_STUB", "1", 0);
+    }  
         ac_odyssey = TRUE;
 
     if (ac_odyssey)
