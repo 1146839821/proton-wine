@@ -243,7 +243,7 @@ static inline BOOL ignore_error( Display *display, XErrorEvent *event )
     {
         return TRUE;
     }
-+#endif
+#endif
     return FALSE;
 }
 
