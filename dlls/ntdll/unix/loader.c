@@ -1958,7 +1958,7 @@ NTSTATUS load_steam_exe( UNICODE_STRING *nt_name, void **module )
     wcscpy( image, get_machine_wow64_dir( current_machine ));
     wcscat( image, startW );
     init_unicode_string( nt_name, image );
-    status = find_builtin_dll( nt_name, NULL, module, &size, &main_image_info, 0, 0, current_machine, 0, FALSE, 0 );
+    status = find_builtin_dll( nt_name, module, &size, &main_image_info, 0, 0, current_machine, 0, FALSE, 0 );
     if (!NT_SUCCESS(status))
     {
         MESSAGE( "wine: failed to load steam.exe: %x\n", status );
@@ -2296,7 +2296,7 @@ static void hacks_init(void)
     if (env_str)
         ac_odyssey = !!atoi(env_str);
     else if (main_argc > 1 && (strstr(main_argv[1], "ACOdyssey.exe") || 
-                               strstr(main_argv[1], "ImmortalsFenyxRising.exe")
+                               strstr(main_argv[1], "ImmortalsFenyxRising.exe") ||
                                strstr(main_argv[1], "GenshinImpact.exe") || 
                                strstr(main_argv[1], "YuanShen.exe") || 
                                strstr(main_argv[1], "ZenlessZoneZero.exe") ||
