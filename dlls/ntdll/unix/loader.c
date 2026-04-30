@@ -1958,7 +1958,7 @@ NTSTATUS load_steam_exe( UNICODE_STRING *nt_name, void **module )
     wcscpy( image, get_machine_wow64_dir( current_machine ));
     wcscat( image, startW );
     init_unicode_string( nt_name, image );
-    status = find_builtin_dll( nt_name, module, &size, &main_image_info, 0, 0, current_machine, 0, FALSE, 0 );
+    status = find_builtin_dll( nt_name, module, &size, &main_image_info, 0, 0, current_machine, 0, FALSE);
     if (!NT_SUCCESS(status))
     {
         MESSAGE( "wine: failed to load steam.exe: %x\n", status );
