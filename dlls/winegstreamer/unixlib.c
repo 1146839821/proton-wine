@@ -363,13 +363,6 @@ NTSTATUS wg_init_gstreamer(void *arg)
     return STATUS_SUCCESS;
 }
 
-    /* HACK: Disable nvdecoder due to cutscenes crashes in HSR on NVIDIA */
-    GstElementFactory *nvh264dec = gst_element_factory_find("nvh264dec");
-    if (nvh264dec)
-    {
-        gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(nvh264dec), GST_RANK_NONE);
-        gst_registry_add_feature(gst_registry_get(), GST_PLUGIN_FEATURE(nvh264dec));
-    }
 
 static bool element_has_property(const GstElement *element, const gchar *property)
 {
